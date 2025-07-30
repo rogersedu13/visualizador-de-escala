@@ -18,9 +18,8 @@ HORARIOS_PADRAO = [
 # --- Configuração da Página ---
 st.set_page_config(page_title="Visualizador de Escala", layout="wide", initial_sidebar_state="expanded")
 
-# --- Conexão com o Supabase (BLOCO CORRIGIDO) ---
+# --- Conexão com o Supabase ---
 try:
-    # Pede ao Streamlit para buscar as chaves usando os NOMES que você definiu nos Secrets
     url = st.secrets["supabase_url"]
     key = st.secrets["supabase_key"]
     supabase: Client = create_client(url, key)
@@ -29,22 +28,32 @@ except Exception as e:
     st.info("Certifique-se de que os nomes nos Secrets são 'supabase_url' e 'supabase_key'.")
     st.stop()
 
-# --- Funções de Dados (usando Supabase) ---
+# --- Funções de Dados (usando Supabase) - CORRIGIDAS ---
 @st.cache_data(ttl=60)
 def carregar_colaboradores():
+    """Carrega colaboradores e garante que o DataFrame tenha a coluna 'nome' mesmo se vazio."""
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
-        return pd.DataFrame(response.data)
+        df = pd.DataFrame(response.data)
+        # CORREÇÃO: Se a tabela estiver vazia, retorna um DataFrame com a coluna esperada
+        if df.empty:
+            return pd.DataFrame(columns=['nome'])
+        return df
     except Exception as e:
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
 
 @st.cache_data(ttl=60)
 def carregar_escalas():
+    """Carrega escalas e garante que o DataFrame tenha as colunas corretas mesmo se vazio."""
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
         df = pd.DataFrame(response.data)
-        if not df.empty and 'data' in df.columns:
+        # CORREÇÃO: Se a tabela estiver vazia, retorna um DataFrame com as colunas esperadas
+        if df.empty:
+            return pd.DataFrame(columns=['nome', 'data', 'horario'])
+        
+        if 'data' in df.columns:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
         return df
     except Exception as e:
@@ -103,7 +112,7 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 5.1 - Conexão Corrigida</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
