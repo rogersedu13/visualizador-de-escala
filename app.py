@@ -18,19 +18,19 @@ HORARIOS_PADRAO = [
 # --- Configuração da Página ---
 st.set_page_config(page_title="Visualizador de Escala", layout="wide", initial_sidebar_state="expanded")
 
-# --- Conexão com o Supabase ---
-# Tenta conectar usando os "Secrets" do Streamlit. Se falhar, mostra um erro claro.
+# --- Conexão com o Supabase (BLOCO CORRIGIDO) ---
 try:
-    url = st.secrets["https://cdgpdnxozsvugtslbjnl.supabase.co"]
-    key = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkZ3BkbnhvenN2dWd0c2xiam5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM4ODM2NTEsImV4cCI6MjA2OTQ1OTY1MX0.h5ySMdIbrcaWSUHwAbhY090BSy-h33CSsGL-2si7twc"]
+    # Pede ao Streamlit para buscar as chaves usando os NOMES que você definiu nos Secrets
+    url = st.secrets["supabase_url"]
+    key = st.secrets["supabase_key"]
     supabase: Client = create_client(url, key)
 except Exception as e:
-    st.error("Falha na conexão com o banco de dados. Verifique a configuração dos 'Secrets' no Streamlit Cloud.")
-    st.info("Se estiver rodando localmente, crie um arquivo .streamlit/secrets.toml com as chaves do Supabase.")
+    st.error("Falha na conexão com o banco de dados. Verifique a configuração dos 'Secrets'.")
+    st.info("Certifique-se de que os nomes nos Secrets são 'supabase_url' e 'supabase_key'.")
     st.stop()
 
 # --- Funções de Dados (usando Supabase) ---
-@st.cache_data(ttl=60) # Cache para não fazer requisições repetidas ao banco
+@st.cache_data(ttl=60)
 def carregar_colaboradores():
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
@@ -53,10 +53,7 @@ def carregar_escalas():
 
 def salvar_escala_semanal(df_para_salvar, datas_da_semana_str):
     try:
-        # Deleta as entradas antigas da semana para evitar duplicatas
         supabase.table('escalas').delete().in_('data', datas_da_semana_str).execute()
-        
-        # Insere os novos dados se houver algo para inserir
         if not df_para_salvar.empty:
             supabase.table('escalas').insert(df_para_salvar.to_dict('records')).execute()
         return True
@@ -105,8 +102,8 @@ df_colaboradores = carregar_colaboradores()
 df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
-st.title("📅 Visualizador de Escala ")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 5.0 - Conectado à Nuvem</p>", unsafe_allow_html=True)
+st.title("📅 Visualizador de Escala")
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 5.1 - Conexão Corrigida</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -122,7 +119,7 @@ if st.session_state.logado:
 # --- Aba: Consultar Minha Escala ---
 if aba == "Consultar minha escala":
     st.header("🔎 Buscar minha escala")
-    nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique())
+    nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
     if not nomes_disponiveis:
         st.warning("Nenhum(a) colaborador(a) cadastrado(a) no sistema. Fale com o fiscal.")
     else:
@@ -296,7 +293,7 @@ elif aba == "Área do Fiscal":
                 st.write("**Adicionar novo(a) colaborador(a):**")
                 novo_nome = st.text_input("Nome").strip()
                 if st.button("Adicionar Colaborador(a)"):
-                    if novo_nome and novo_nome not in df_colaboradores["nome"].values:
+                    if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
                         if adicionar_colaborador(novo_nome):
                             st.cache_data.clear()
                             st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
@@ -305,13 +302,14 @@ elif aba == "Área do Fiscal":
                         st.error("Nome inválido ou já existente.")
                 
                 st.write("**Remover colaborador(a):**")
-                nomes_para_remover = st.multiselect("Selecione para remover", options=df_colaboradores["nome"].tolist())
-                if st.button("Remover Selecionados", type="secondary"):
-                    if nomes_para_remover:
-                        if remover_colaboradores(nomes_para_remover):
-                            st.cache_data.clear()
-                            st.success("Colaboradores removidos com sucesso!")
-                            st.rerun()
+                if not df_colaboradores.empty:
+                    nomes_para_remover = st.multiselect("Selecione para remover", options=df_colaboradores["nome"].tolist())
+                    if st.button("Remover Selecionados", type="secondary"):
+                        if nomes_para_remover:
+                            if remover_colaboradores(nomes_para_remover):
+                                st.cache_data.clear()
+                                st.success("Colaboradores removidos com sucesso!")
+                                st.rerun()
 
 # --- RODAPÉ ---
 st.markdown("---")
