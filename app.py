@@ -11,8 +11,9 @@ from fpdf import FPDF
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
-    "9:00 HRS", "9:30 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
-    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS"
+    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
+    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS",
+    "15:30 HRS", "16:00 HRS", "16:30 HRS", "17:00 HRS", "17:30 HRS", "18:00 HRS",
 ]
 
 # --- Configuração da Página ---
