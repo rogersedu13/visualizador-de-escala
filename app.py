@@ -11,9 +11,9 @@ from fpdf import FPDF
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
-    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
-    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS",
-    "15:30 HRS", "16:00 HRS", "16:30 HRS", "17:00 HRS", "17:30 HRS", "18:00 HRS",
+    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS" "11:00 HRS", "11:30 HRS",
+    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS",
+    "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS",
 ]
 
 # --- Configuração da Página ---
@@ -29,14 +29,12 @@ except Exception as e:
     st.info("Certifique-se de que os nomes nos Secrets são 'supabase_url' e 'supabase_key'.")
     st.stop()
 
-# --- Funções de Dados (usando Supabase) - CORRIGIDAS ---
+# --- Funções de Dados (usando Supabase) ---
 @st.cache_data(ttl=60)
 def carregar_colaboradores():
-    """Carrega colaboradores e garante que o DataFrame tenha a coluna 'nome' mesmo se vazio."""
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
         df = pd.DataFrame(response.data)
-        # CORREÇÃO: Se a tabela estiver vazia, retorna um DataFrame com a coluna esperada
         if df.empty:
             return pd.DataFrame(columns=['nome'])
         return df
@@ -46,11 +44,9 @@ def carregar_colaboradores():
 
 @st.cache_data(ttl=60)
 def carregar_escalas():
-    """Carrega escalas e garante que o DataFrame tenha as colunas corretas mesmo se vazio."""
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
         df = pd.DataFrame(response.data)
-        # CORREÇÃO: Se a tabela estiver vazia, retorna um DataFrame com as colunas esperadas
         if df.empty:
             return pd.DataFrame(columns=['nome', 'data', 'horario'])
         
@@ -113,10 +109,10 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 5.3 - Correção de Navegação</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
-aba = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
+aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -127,7 +123,7 @@ if st.session_state.logado:
         st.rerun()
 
 # --- Aba: Consultar Minha Escala ---
-if aba == "Consultar minha escala":
+if aba_principal == "Consultar minha escala":
     st.header("🔎 Buscar minha escala")
     nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
     if not nomes_disponiveis:
@@ -182,7 +178,7 @@ if aba == "Consultar minha escala":
                 st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
 
 # --- Aba: Área do Fiscal ---
-elif aba == "Área do Fiscal":
+elif aba_principal == "Área do Fiscal":
     df_fiscais = carregar_fiscais()
     if not st.session_state.logado:
         st.header("🔐 Login do Fiscal")
@@ -205,9 +201,16 @@ elif aba == "Área do Fiscal":
                         st.error("Código ou senha incorretos.")
     else: # Se já estiver logado
         st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
-        tab1, tab2, tab3 = st.tabs(["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"])
-
-        with tab1:
+        
+        opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
+        aba_selecionada = st.radio(
+            "Navegação do Fiscal", 
+            opcoes_abas, 
+            horizontal=True, 
+            label_visibility="collapsed"
+        )
+        
+        if aba_selecionada == "Visão Geral da Escala":
             st.subheader("🗓️ Visão Geral da Escala")
             data_inicio_visao = st.date_input("Ver escala a partir de:", datetime.date.today())
             if data_inicio_visao:
@@ -225,7 +228,7 @@ elif aba == "Área do Fiscal":
                     df_view['data'] = df_view['data'].apply(formatar_data_manual)
                     st.dataframe(df_view.sort_values(["data", "nome"]), use_container_width=True, hide_index=True)
 
-        with tab2:
+        elif aba_selecionada == "Editar Escala Semanal":
             st.subheader("✏️ Editar Escala Semanal")
             if df_colaboradores.empty:
                 st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' antes de editar as escalas.")
@@ -293,7 +296,7 @@ elif aba == "Área do Fiscal":
                             st.success("Escala salva com sucesso na nuvem!")
                             st.rerun()
 
-        with tab3:
+        elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
             col1, col2 = st.columns([0.6, 0.4])
             with col1:
