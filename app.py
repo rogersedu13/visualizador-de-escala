@@ -57,16 +57,19 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
+# --- FUNÇÃO DE SALVAMENTO CORRIGIDA ---
 def salvar_escala_semanal(df_semana_completa):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
+    """Salva a escala de forma segura, tratando 'Folga' como um dado válido."""
     try:
         for _, row in df_semana_completa.iterrows():
             nome = row['nome']
             data = row['data'].strftime('%Y-%m-%d')
             horario = row['horario']
 
-            if horario in ["", "Folga", None]:
+            # Se o horário for limpo (APENAS vazio), apaga o registro daquele dia
+            if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
+            # Se houver um horário (INCLUINDO "Folga"), insere ou atualiza (upsert)
             else:
                 supabase.table('escalas').upsert({
                     'nome': nome,
@@ -75,8 +78,7 @@ def salvar_escala_semanal(df_semana_completa):
                 }, on_conflict='nome, data').execute()
         return True
     except Exception as e:
-        # Mensagem de erro mais detalhada
-        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
+        st.error(f"Erro ao salvar a escala: {e}")
         return False
 
 def adicionar_colaborador(nome):
@@ -287,33 +289,23 @@ elif aba_principal == "Área do Fiscal":
                         key="editor_grade_semanal"
                     )
 
-                    # --- BLOCO DE DIAGNÓSTICO ---
                     if st.button("Salvar Escala da Semana", type="primary"):
-                        with st.spinner("Salvando... Por favor, aguarde."):
-                            st.info("✅ Passo 1: O botão foi clicado. Preparando os dados...")
-                            
-                            mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
-                            df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
+                        mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
+                        df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
 
-                            df_unpivoted = df_editado.melt(
-                                id_vars=['nome'], 
-                                value_vars=datas_da_semana,
-                                var_name='data', 
-                                value_name='horario'
-                            )
-                            
-                            df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
-                            
-                            st.info("✅ Passo 2: Dados preparados. Chamando a função para salvar no banco de dados...")
-                            
-                            if salvar_escala_semanal(df_unpivoted):
-                                st.info("✅ Passo 3: A função de salvamento retornou SUCESSO.")
-                                st.cache_data.clear()
-                                st.success("Escala da semana salva com sucesso!")
-                                st.info("Recarregando a página...")
-                                st.rerun()
-                            else:
-                                st.error("❌ Passo 3: A função de salvamento retornou FALHA. Verifique a mensagem de erro detalhada que apareceu acima.")
+                        df_unpivoted = df_editado.melt(
+                            id_vars=['nome'], 
+                            value_vars=datas_da_semana,
+                            var_name='data', 
+                            value_name='horario'
+                        )
+                        
+                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
+                        
+                        if salvar_escala_semanal(df_unpivoted):
+                            st.cache_data.clear()
+                            st.success("Escala da semana salva com sucesso!")
+                            st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
