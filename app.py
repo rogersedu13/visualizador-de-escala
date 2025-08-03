@@ -57,30 +57,17 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO FINAL E SIMPLIFICADA ---
-def salvar_escala_final(registros_da_semana):
-    """Apaga todos os registros da semana para um colaborador e insere os novos."""
+def salvar_escala_final(nome_colaborador, data_inicio_semana, registros):
+    """Chama a função SQL no Supabase para fazer a atualização de forma atômica."""
     try:
-        if not registros_da_semana:
-            return True # Nada a fazer
+        # Prepara a lista de registros para inserir, filtrando os vazios
+        registros_para_inserir = [reg for reg in registros if reg['horario'] not in ["", None]]
 
-        nome_colaborador = registros_da_semana[0]['nome']
-        datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
-
-        # Passo 1: Deleção segura e específica para o colaborador e a semana em questão.
-        supabase.table('escalas').delete().match({
-            'nome': nome_colaborador
-        }).in_('data', datas_da_semana_str).execute()
-        
-        # Passo 2: Prepara a lista de novos registros para inserir (filtrando os vazios)
-        registros_para_inserir = [
-            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
-        ]
-
-        # Passo 3: Insere os novos registros em um único comando, se houver algum.
-        if registros_para_inserir:
-            supabase.table('escalas').insert(registros_para_inserir).execute()
-            
+        supabase.rpc('atualizar_escala_semanal', {
+            'p_nome': nome_colaborador,
+            'p_data_inicio': data_inicio_semana.strftime('%Y-%m-%d'),
+            'p_registros': registros_para_inserir
+        }).execute()
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
@@ -299,15 +286,11 @@ elif aba_principal == "Área do Fiscal":
                                 widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
                                 novo_horario = st.session_state[widget_key]
                                 
-                                registro = {
-                                    "nome": colaborador_selecionado,
-                                    "data": data_obj.strftime('%Y-%m-%d'),
-                                    "horario": novo_horario
-                                }
+                                registro = { "data": data_obj.strftime('%Y-%m-%d'), "horario": novo_horario }
                                 registros_para_salvar.append(registro)
                             
                             with st.spinner("Salvando..."):
-                                if salvar_escala_final(registros_para_salvar):
+                                if salvar_escala_final(colaborador_selecionado, dia_inicio_semana, registros_para_salvar):
                                     st.cache_data.clear()
                                     st.success("Escala salva com sucesso!")
                                     time.sleep(1)
