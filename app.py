@@ -59,16 +59,19 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
+# --- FUNÇÃO DE SALVAMENTO CORRIGIDA ---
 def salvar_escala_semanal(df_semana_completa):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
+    """Salva a escala de forma segura, tratando 'Folga' como um dado válido."""
     try:
         for _, row in df_semana_completa.iterrows():
             nome = row['nome']
             data = row['data'].strftime('%Y-%m-%d')
             horario = row['horario']
 
-            if horario in ["", "Folga", None]:
+            # Se o horário for limpo (APENAS vazio), apaga o registro daquele dia
+            if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
+            # Se houver um horário (INCLUINDO "Folga", "Ferias", etc.), insere ou atualiza
             else:
                 supabase.table('escalas').upsert({
                     'nome': nome,
@@ -79,6 +82,7 @@ def salvar_escala_semanal(df_semana_completa):
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
         return False
+
 
 def adicionar_colaborador(nome):
     try:
@@ -289,29 +293,23 @@ elif aba_principal == "Área do Fiscal":
                     )
 
                     if st.button("Salvar Escala da Semana", type="primary"):
-                        with st.spinner("Processando e salvando a escala..."):
-                            mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
-                            df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
+                        mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
+                        df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
 
-                            df_unpivoted = df_editado.melt(
-                                id_vars=['nome'], 
-                                value_vars=datas_da_semana,
-                                var_name='data', 
-                                value_name='horario'
-                            )
-                            df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
-                            
-                            # --- CORREÇÃO APLICADA AQUI ---
-                            # O nome da função de salvamento foi corrigido
-                            save_successful = salvar_escala_semanal(df_unpivoted)
-                            
-                            if save_successful:
-                                st.cache_data.clear()
-                                st.success("Escala da semana salva com sucesso!")
-                                time.sleep(1) # Pausa para o usuário ver a mensagem
-                                st.rerun()
-                            else:
-                                st.error("A função de salvamento FALHOU. Verifique a mensagem de erro detalhada acima.")
+                        df_unpivoted = df_editado.melt(
+                            id_vars=['nome'], 
+                            value_vars=datas_da_semana,
+                            var_name='data', 
+                            value_name='horario'
+                        )
+                        
+                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
+                        
+                        if salvar_escala_semanal(df_unpivoted):
+                            st.cache_data.clear()
+                            st.success("Escala da semana salva com sucesso!")
+                            time.sleep(1)
+                            st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
