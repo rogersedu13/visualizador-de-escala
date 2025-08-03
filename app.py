@@ -58,7 +58,6 @@ def carregar_escalas():
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
 def salvar_escala_semanal(df_semana_completa):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
         for _, row in df_semana_completa.iterrows():
             nome = row['nome']
@@ -241,6 +240,7 @@ elif aba_principal == "Área do Fiscal":
 
         elif aba_selecionada == "Editar Escala Semanal":
             st.subheader("✏️ Editar Escala Semanal")
+            # --- VERIFICAÇÃO DE SEGURANÇA ADICIONADA AQUI ---
             if df_colaboradores.empty:
                 st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' antes de editar as escalas.")
             else:
@@ -263,31 +263,30 @@ elif aba_principal == "Área do Fiscal":
                     datas_da_semana = [ts_inicio_semana + timedelta(days=i) for i in range(7)]
                     grade_base = df_colaboradores.copy()
                     
-                    if not grade_base.empty:
-                        for data in datas_da_semana:
-                            grade_base[data] = ""
-                        grade_base.set_index('nome', inplace=True)
+                    for data in datas_da_semana:
+                        grade_base[data] = ""
+                    grade_base.set_index('nome', inplace=True)
 
-                        if not escala_semana.empty:
-                            pivot_existente = escala_semana.pivot_table(index='nome', columns='data', values='horario', aggfunc='first')
-                            grade_base.update(pivot_existente)
-                        
-                        grade_base.reset_index(inplace=True)
-                        
-                        mapa_nomes_colunas = {col: f"{DIAS_SEMANA_PT[col.weekday()]} ({col.strftime('%d/%m')})" for col in datas_da_semana}
-                        grade_display = grade_base.rename(columns=mapa_nomes_colunas)
-                        
-                        column_config = {"nome": st.column_config.TextColumn("Colaborador(a)", disabled=True)}
-                        for col_amigavel in sorted(mapa_nomes_colunas.values()):
-                            column_config[col_amigavel] = st.column_config.SelectboxColumn(col_amigavel, options=HORARIOS_PADRAO)
+                    if not escala_semana.empty:
+                        pivot_existente = escala_semana.pivot_table(index='nome', columns='data', values='horario', aggfunc='first')
+                        grade_base.update(pivot_existente)
+                    
+                    grade_base.reset_index(inplace=True)
+                    
+                    mapa_nomes_colunas = {col: f"{DIAS_SEMANA_PT[col.weekday()]} ({col.strftime('%d/%m')})" for col in datas_da_semana}
+                    grade_display = grade_base.rename(columns=mapa_nomes_colunas)
+                    
+                    column_config = {"nome": st.column_config.TextColumn("Colaborador(a)", disabled=True)}
+                    for col_amigavel in sorted(mapa_nomes_colunas.values()):
+                        column_config[col_amigavel] = st.column_config.SelectboxColumn(col_amigavel, options=HORARIOS_PADRAO)
 
-                        df_editado = st.data_editor(
-                            grade_display,
-                            column_config=column_config,
-                            use_container_width=True,
-                            hide_index=True,
-                            key="editor_grade_semanal"
-                        )
+                    df_editado = st.data_editor(
+                        grade_display,
+                        column_config=column_config,
+                        use_container_width=True,
+                        hide_index=True,
+                        key="editor_grade_semanal"
+                    )
                     
                     submitted = st.form_submit_button("Salvar Escala da Semana")
 
