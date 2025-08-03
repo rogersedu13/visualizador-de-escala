@@ -57,6 +57,35 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
+# --- FUNÇÃO DE SALVAMENTO FINAL E SEGURA ---
+def salvar_escala_individual(registros_da_semana):
+    """Apaga todos os registros da semana para um colaborador e insere os novos."""
+    try:
+        if not registros_da_semana:
+            return True # Nada a fazer
+
+        nome_colaborador = registros_da_semana[0]['nome']
+        datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
+
+        # Passo 1: Deleção segura e específica para o colaborador e a semana em questão.
+        supabase.table('escalas').delete().match({
+            'nome': nome_colaborador
+        }).in_('data', datas_da_semana_str).execute()
+        
+        # Passo 2: Prepara a lista de novos registros para inserir (filtrando os vazios)
+        registros_para_inserir = [
+            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
+        ]
+
+        # Passo 3: Insere os novos registros em um único comando, se houver algum.
+        if registros_para_inserir:
+            supabase.table('escalas').insert(registros_para_inserir).execute()
+            
+        return True
+    except Exception as e:
+        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
+        return False
+
 def adicionar_colaborador(nome):
     try:
         supabase.table('colaboradores').insert({"nome": nome}).execute()
@@ -86,13 +115,20 @@ def formatar_data_manual(data_timestamp):
     dia_semana_str = DIAS_SEMANA_PT[data_timestamp.weekday()]
     return data_timestamp.strftime(f'%d/%m/%Y ({dia_semana_str})')
 
+# --- Classe para Geração de PDF ---
+class PDF(FPDF):
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Arial", "I", 8)
+        self.cell(0, 10, "Boa Semana e Bom Trabalho", 0, 0, "C")
+
 # --- Carregamento inicial dos dados ---
 df_colaboradores = carregar_colaboradores()
 df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 14.1 - Teste de Escrita</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -106,78 +142,6 @@ if st.session_state.logado:
         st.rerun()
 
 # --- Aba: Consultar Minha Escala ---
-if aba_principal == "Consultar minha escala":
-    # Este código não foi alterado
-    pass
-
-# --- Aba: Área do Fiscal ---
-elif aba_principal == "Área do Fiscal":
-    df_fiscais = carregar_fiscais()
-    if not st.session_state.logado:
-        # Este código não foi alterado
-        pass
-    else: 
-        st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
-        
-        opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
-        aba_selecionada = st.radio("Navegação do Fiscal", opcoes_abas, horizontal=True, label_visibility="collapsed")
-        
-        if aba_selecionada == "Visão Geral da Escala":
-            # Este código não foi alterado
-            pass
-
-        elif aba_selecionada == "Editar Escala Semanal":
-            st.subheader("✏️ Editar Escala Semanal")
-            if df_colaboradores.empty:
-                st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' primeiro.")
-            else:
-                col1, col2 = st.columns(2)
-                with col1:
-                    dia_selecionado = st.date_input("Selecione uma data para a semana:", datetime.date.today())
-                with col2:
-                    nomes_lista = [""] + df_colaboradores["nome"].tolist()
-                    colaborador_selecionado = st.selectbox("Selecione o colaborador para editar:", nomes_lista, index=0)
-
-                if colaborador_selecionado:
-                    dia_inicio_semana = dia_selecionado - timedelta(days=dia_selecionado.weekday())
-                    st.info(f"Semana de **{dia_inicio_semana.strftime('%d/%m/%Y')}** para **{colaborador_selecionado}**")
-                    
-                    st.warning("MODO DE TESTE ATIVADO: O botão abaixo irá inserir um horário de teste para a segunda-feira desta semana.")
-
-                    if st.button("Salvar Escala (MODO DE TESTE)", type="primary"):
-                        st.info("--- INICIANDO TESTE DE ESCRITA DIRETA ---")
-                        try:
-                            nome_teste = colaborador_selecionado
-                            data_teste = dia_inicio_semana.strftime('%Y-%m-%d')
-                            horario_teste = f"TESTE_{datetime.datetime.now().strftime('%H%M%S')}"
-
-                            st.write(f"Tentando inserir: Nome='{nome_teste}', Data='{data_teste}', Horário='{horario_teste}'")
-
-                            response = supabase.table('escalas').insert({
-                                "nome": nome_teste,
-                                "data": data_teste,
-                                "horario": horario_teste
-                            }).execute()
-
-                            st.success("Comando de inserção enviado com SUCESSO!")
-                            st.write("Resposta do Supabase:")
-                            st.json(response.data if hasattr(response, 'data') else str(response))
-
-                            st.info("Limpando o cache e recarregando a página...")
-                            st.cache_data.clear()
-                            time.sleep(2)
-                            st.rerun()
-
-                        except Exception as e:
-                            st.error("A INSERÇÃO DE TESTE FALHOU COM UM ERRO:")
-                            st.exception(e)
-
-        elif aba_selecionada == "Gerenciar Colaboradores":
-            # Este código não foi alterado
-            pass
-
-# --- Código completo abaixo para referência ---
-# Adicionei as partes que faltavam para garantir que o código esteja 100% completo
 if aba_principal == "Consultar minha escala":
     st.header("🔎 Buscar minha escala")
     nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
@@ -213,12 +177,33 @@ if aba_principal == "Consultar minha escala":
                 resultados_display["data"] = resultados_display["data"].apply(formatar_data_manual)
                 st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
                 
-                # O código do PDF não foi alterado
+                if st.button("📥 Baixar em PDF"):
+                    pdf = PDF()
+                    pdf.add_page()
+                    pdf.set_font("Arial", "B", 16)
+                    pdf.cell(0, 10, f"Escala de Trabalho: {nome_confirmado}", ln=True, align="C")
+                    pdf.ln(10)
+                    pdf.set_font("Arial", "B", 12)
+                    pdf.cell(95, 10, 'Data', 1, 0, 'C')
+                    pdf.cell(95, 10, 'Horario', 1, 1, 'C')
+                    pdf.set_font("Arial", "", 12)
+                    for _, row in resultados_display.iterrows():
+                        data_pdf = row['data'].encode('latin-1', 'replace').decode('latin-1')
+                        horario_pdf = str(row['horario']).encode('latin-1', 'replace').decode('latin-1')
+                        pdf.cell(95, 10, data_pdf, 1, 0, 'C')
+                        pdf.cell(95, 10, horario_pdf, 1, 1, 'C')
+                    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                    b64 = base64.b64encode(pdf_bytes).decode()
+                    href = f'<a href="data:application/pdf;base64,{b64}" download="escala_{nome_confirmado}.pdf" target="_blank">Clique aqui para baixar o PDF</a>'
+                    st.markdown(href, unsafe_allow_html=True)
             else:
                 st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
 
-if aba_principal == "Área do Fiscal":
+# --- Aba: Área do Fiscal ---
+elif aba_principal == "Área do Fiscal":
+    df_fiscais = carregar_fiscais()
     if not st.session_state.logado:
+        st.header("🔐 Login do Fiscal")
         with st.form("login_form"):
             codigo = st.text_input("Código do fiscal")
             senha = st.text_input("Senha", type="password")
@@ -229,14 +214,19 @@ if aba_principal == "Área do Fiscal":
                 elif not codigo.isdigit():
                     st.error("Código inválido. Digite apenas números.")
                 else:
-                    fiscal_auth = carregar_fiscais()[(carregar_fiscais()["codigo"] == int(codigo)) & (carregar_fiscais()["senha"] == senha)]
+                    fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == senha)]
                     if not fiscal_auth.empty:
                         st.session_state.logado = True
                         st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]
                         st.rerun()
                     else:
                         st.error("Código ou senha incorretos.")
-    else:
+    else: # Se já estiver logado
+        st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
+        
+        opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
+        aba_selecionada = st.radio("Navegação do Fiscal", opcoes_abas, horizontal=True, label_visibility="collapsed")
+        
         if aba_selecionada == "Visão Geral da Escala":
             st.subheader("🗓️ Visão Geral da Escala")
             data_inicio_visao = st.date_input("Ver escala a partir de:", datetime.date.today())
@@ -257,7 +247,72 @@ if aba_principal == "Área do Fiscal":
                 else:
                     df_view['data'] = df_view['data'].apply(formatar_data_manual)
                     st.dataframe(df_view.sort_values(["data", "nome"]), use_container_width=True, hide_index=True)
-        
+
+        elif aba_selecionada == "Editar Escala Semanal":
+            st.subheader("✏️ Editar Escala Semanal")
+            if df_colaboradores.empty:
+                st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' primeiro.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    dia_selecionado = st.date_input("Selecione uma data para a semana:", datetime.date.today())
+                with col2:
+                    nomes_lista = [""] + df_colaboradores["nome"].tolist()
+                    colaborador_selecionado = st.selectbox("Selecione o colaborador para editar:", nomes_lista, index=0)
+
+                if colaborador_selecionado:
+                    dia_inicio_semana = dia_selecionado - timedelta(days=dia_selecionado.weekday())
+                    st.info(f"Editando a semana de **{dia_inicio_semana.strftime('%d/%m/%Y')}** para **{colaborador_selecionado}**")
+                    
+                    datas_da_semana_obj = [dia_inicio_semana + timedelta(days=i) for i in range(7)]
+                    datas_da_semana_ts = [pd.to_datetime(d) for d in datas_da_semana_obj]
+
+                    escala_atual_colaborador = df_escalas[
+                        (df_escalas['nome'] == colaborador_selecionado) &
+                        (df_escalas['data'].isin(datas_da_semana_ts))
+                    ]
+                    
+                    with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana.strftime('%Y%m%d')}"):
+                        cols = st.columns(7)
+                        for i, data_obj in enumerate(datas_da_semana_obj):
+                            dia_str = DIAS_SEMANA_PT[i]
+                            
+                            horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
+                            horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
+                            
+                            index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
+                            
+                            with cols[i]:
+                                widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
+                                st.selectbox(
+                                    f"{dia_str} ({data_obj.strftime('%d/%m')})",
+                                    options=HORARIOS_PADRAO,
+                                    index=index_horario,
+                                    key=widget_key 
+                                )
+                        
+                        submitted = st.form_submit_button("Salvar Escala de " + colaborador_selecionado)
+                        
+                        if submitted:
+                            registros_para_salvar = []
+                            for i, data_obj in enumerate(datas_da_semana_obj):
+                                widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
+                                novo_horario = st.session_state[widget_key]
+                                
+                                registro = {
+                                    "nome": colaborador_selecionado,
+                                    "data": data_obj.strftime('%Y-%m-%d'),
+                                    "horario": novo_horario
+                                }
+                                registros_para_salvar.append(registro)
+                            
+                            with st.spinner("Salvando..."):
+                                if salvar_escala_individual(registros_para_salvar):
+                                    st.cache_data.clear()
+                                    st.success("Escala salva com sucesso!")
+                                    time.sleep(1)
+                                    st.rerun()
+
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
             col1, col2 = st.columns([0.6, 0.4])
@@ -285,6 +340,7 @@ if aba_principal == "Área do Fiscal":
                                 st.cache_data.clear()
                                 st.success("Colaboradores removidos com sucesso!")
                                 st.rerun()
+
 # --- RODAPÉ ---
 st.markdown("---")
 st.markdown(
