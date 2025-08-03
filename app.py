@@ -59,16 +59,16 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO CORRIGIDA ---
+# --- FUNÇÃO DE SALVAMENTO CORRIGIDA E FINAL ---
 def salvar_escala_semanal(df_semana_completa):
-    """Salva a escala de forma segura, tratando 'Folga' como um dado válido."""
+    """Salva a escala de forma segura, tratando 'Folga' e outros como dados válidos."""
     try:
         for _, row in df_semana_completa.iterrows():
             nome = row['nome']
             data = row['data'].strftime('%Y-%m-%d')
             horario = row['horario']
 
-            # Se o horário for limpo (APENAS vazio), apaga o registro daquele dia
+            # Se o horário for limpo (APENAS vazio ou nulo), apaga o registro daquele dia
             if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
             # Se houver um horário (INCLUINDO "Folga", "Ferias", etc.), insere ou atualiza
@@ -110,7 +110,9 @@ def carregar_fiscais():
 def formatar_data_manual(data_timestamp):
     if pd.isna(data_timestamp):
         return ""
-    dia_semana_str = DIAS_SEMANA_PT[data_timestamp.weekday()]
+    # Mapeamento manual para evitar problemas de locale
+    dias_map = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+    dia_semana_str = dias_map[data_timestamp.weekday()]
     return data_timestamp.strftime(f'%d/%m/%Y ({dia_semana_str})')
 
 # --- Classe para Geração de PDF ---
