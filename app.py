@@ -37,9 +37,7 @@ def carregar_colaboradores():
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
         df = pd.DataFrame(response.data)
-        if df.empty:
-            return pd.DataFrame(columns=['nome'])
-        return df
+        return df if not df.empty else pd.DataFrame(columns=['nome'])
     except Exception as e:
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
@@ -59,13 +57,13 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-def salvar_escala_semanal(df_semana_completa):
+def salvar_escala_individual(registros_para_salvar):
     """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
-        for _, row in df_semana_completa.iterrows():
-            nome = row['nome']
-            data = row['data'].strftime('%Y-%m-%d')
-            horario = row['horario']
+        for registro in registros_para_salvar:
+            nome = registro['nome']
+            data = registro['data']
+            horario = registro['horario']
 
             if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
@@ -216,12 +214,7 @@ elif aba_principal == "Área do Fiscal":
         st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
         
         opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
-        aba_selecionada = st.radio(
-            "Navegação do Fiscal", 
-            opcoes_abas, 
-            horizontal=True, 
-            label_visibility="collapsed"
-        )
+        aba_selecionada = st.radio("Navegação do Fiscal", opcoes_abas, horizontal=True, label_visibility="collapsed")
         
         if aba_selecionada == "Visão Geral da Escala":
             st.subheader("🗓️ Visão Geral da Escala")
@@ -244,71 +237,67 @@ elif aba_principal == "Área do Fiscal":
         elif aba_selecionada == "Editar Escala Semanal":
             st.subheader("✏️ Editar Escala Semanal")
             if df_colaboradores.empty:
-                st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' antes de editar as escalas.")
+                st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' primeiro.")
             else:
-                dia_selecionado = st.date_input("Selecione qualquer dia da semana que deseja editar:", datetime.date.today(), key="seletor_semana")
-                
-                dia_inicio_semana = dia_selecionado - timedelta(days=dia_selecionado.weekday())
-                dia_fim_semana = dia_inicio_semana + timedelta(days=6)
-                st.info(f"Editando a semana de: **{dia_inicio_semana.strftime('%d/%m/%Y')}** a **{dia_fim_semana.strftime('%d/%m/%Y')}**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    dia_selecionado = st.date_input("Selecione uma data para a semana:", datetime.date.today())
+                with col2:
+                    nomes_lista = [""] + df_colaboradores["nome"].tolist()
+                    colaborador_selecionado = st.selectbox("Selecione o colaborador para editar:", nomes_lista, index=0)
 
-                ts_inicio_semana = pd.to_datetime(dia_inicio_semana)
-                ts_fim_semana = pd.to_datetime(dia_fim_semana)
-
-                escala_semana = df_escalas[
-                    (df_escalas['data'] >= ts_inicio_semana) &
-                    (df_escalas['data'] <= ts_fim_semana)
-                ]
-                
-                datas_da_semana = [ts_inicio_semana + timedelta(days=i) for i in range(7)]
-                grade_base = df_colaboradores.copy()
-                
-                if not grade_base.empty:
-                    for data in datas_da_semana:
-                        grade_base[data] = ""
-                    grade_base.set_index('nome', inplace=True)
-
-                    if not escala_semana.empty:
-                        pivot_existente = escala_semana.pivot_table(index='nome', columns='data', values='horario', aggfunc='first')
-                        grade_base.update(pivot_existente)
+                if colaborador_selecionado:
+                    dia_inicio_semana = dia_selecionado - timedelta(days=dia_selecionado.weekday())
+                    st.info(f"Editando a semana de **{dia_inicio_semana.strftime('%d/%m/%Y')}** para **{colaborador_selecionado}**")
                     
-                    grade_base.reset_index(inplace=True)
-                    
-                    mapa_nomes_colunas = {col: f"{DIAS_SEMANA_PT[col.weekday()]} ({col.strftime('%d/%m')})" for col in datas_da_semana}
-                    grade_display = grade_base.rename(columns=mapa_nomes_colunas)
-                    
-                    column_config = {"nome": st.column_config.TextColumn("Colaborador(a)", disabled=True)}
-                    for col_amigavel in sorted(mapa_nomes_colunas.values()):
-                        column_config[col_amigavel] = st.column_config.SelectboxColumn(col_amigavel, options=HORARIOS_PADRAO)
+                    datas_da_semana_obj = [dia_inicio_semana + timedelta(days=i) for i in range(7)]
+                    datas_da_semana_ts = [pd.to_datetime(d) for d in datas_da_semana_obj]
 
-                    # --- CORREÇÃO FINAL: Chave do editor agora é única para cada semana ---
-                    editor_key = f"editor_{dia_inicio_semana.strftime('%Y%m%d')}"
-                    df_editado = st.data_editor(
-                        grade_display,
-                        column_config=column_config,
-                        use_container_width=True,
-                        hide_index=True,
-                        key=editor_key
-                    )
-                
-                if st.button("Salvar Escala da Semana", type="primary"):
-                    with st.spinner("Salvando..."):
-                        mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
-                        df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
-
-                        df_unpivoted = df_editado.melt(
-                            id_vars=['nome'], 
-                            value_vars=datas_da_semana,
-                            var_name='data', 
-                            value_name='horario'
-                        )
-                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
+                    escala_atual_colaborador = df_escalas[
+                        (df_escalas['nome'] == colaborador_selecionado) &
+                        (df_escalas['data'].isin(datas_da_semana_ts))
+                    ]
+                    
+                    with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana}"):
+                        horarios_semana = {}
+                        cols = st.columns(7)
+                        for i, data_obj in enumerate(datas_da_semana_obj):
+                            dia_str = DIAS_SEMANA_PT[i]
+                            
+                            horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
+                            horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
+                            
+                            index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
+                            
+                            with cols[i]:
+                                horarios_semana[dia_str] = st.selectbox(
+                                    f"{dia_str} ({data_obj.strftime('%d/%m')})",
+                                    options=HORARIOS_PADRAO,
+                                    index=index_horario,
+                                    key=f"horario_{i}"
+                                )
                         
-                        if salvar_escala_semanal(df_unpivoted):
-                            st.cache_data.clear()
-                            st.success("Escala da semana salva com sucesso!")
-                            time.sleep(1)
-                            st.rerun()
+                        submitted = st.form_submit_button("Salvar Escala de " + colaborador_selecionado)
+                        
+                        if submitted:
+                            registros_para_salvar = []
+                            for i, data_obj in enumerate(datas_da_semana_obj):
+                                dia_str = DIAS_SEMANA_PT[i]
+                                novo_horario = horarios_semana[dia_str]
+                                
+                                registro = {
+                                    "nome": colaborador_selecionado,
+                                    "data": data_obj.strftime('%Y-%m-%d'),
+                                    "horario": novo_horario
+                                }
+                                registros_para_salvar.append(registro)
+                            
+                            with st.spinner("Salvando..."):
+                                if salvar_escala_individual(registros_para_salvar):
+                                    st.cache_data.clear()
+                                    st.success("Escala salva com sucesso!")
+                                    time.sleep(1)
+                                    st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
