@@ -59,15 +59,24 @@ def carregar_escalas():
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
 # --- FUNÇÃO DE SALVAMENTO FINAL E SEGURA ---
-def salvar_escala_semanal(df_para_salvar, datas_da_semana_str):
-    """Apaga apenas a semana atual e insere os novos dados."""
+def salvar_escala_semanal_cirurgico(df_semana_completa):
+    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
-        # 1. Deleta apenas as entradas da semana que está sendo editada
-        supabase.table('escalas').delete().in_('data', datas_da_semana_str).execute()
-        
-        # 2. Insere os novos dados se houver algo para inserir
-        if not df_para_salvar.empty:
-            supabase.table('escalas').insert(df_para_salvar.to_dict('records')).execute()
+        for _, row in df_semana_completa.iterrows():
+            nome = row['nome']
+            data = row['data'].strftime('%Y-%m-%d')
+            horario = row['horario']
+
+            # Se o horário for limpo (vazio OU Folga), apaga o registro daquele dia
+            if horario in ["", "Folga", None]:
+                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
+            # Se houver um horário, insere ou atualiza (upsert)
+            else:
+                supabase.table('escalas').upsert({
+                    'nome': nome,
+                    'data': data,
+                    'horario': horario
+                }, on_conflict='nome, data').execute()
         return True
     except Exception as e:
         st.error(f"Erro ao salvar a escala: {e}")
@@ -292,14 +301,11 @@ elif aba_principal == "Área do Fiscal":
                             value_name='horario'
                         )
                         
-                        # FILTRO CORRIGIDO PARA MANTER "FOLGA" E REMOVER APENAS OS VAZIOS
-                        df_unpivoted = df_unpivoted[df_unpivoted['horario'].isin(["", None]) == False]
-                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data']).dt.strftime('%Y-%m-%d')
+                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
                         
-                        datas_str = [d.strftime('%Y-%m-%d') for d in datas_da_semana]
-                        if salvar_escala_semanal(df_unpivoted, datas_str):
+                        if salvar_escala_semanal_cirurgico(df_unpivoted):
                             st.cache_data.clear()
-                            st.success("Escala da semana salva com sucesso na nuvem!")
+                            st.success("Escala da semana salva com sucesso!")
                             st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
