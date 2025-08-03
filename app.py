@@ -7,6 +7,7 @@ import base64
 from io import BytesIO
 from fpdf import FPDF
 import time
+import random
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -32,7 +33,7 @@ except Exception as e:
     st.stop()
 
 # --- Funções de Dados (usando Supabase) ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=10)
 def carregar_colaboradores():
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
@@ -42,7 +43,7 @@ def carregar_colaboradores():
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=10)
 def carregar_escalas():
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
@@ -57,19 +58,15 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO CIRÚRGICA E DEFINITIVA ---
 def salvar_escala_individual(registros_para_salvar):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
         for registro in registros_para_salvar:
             nome = registro['nome']
             data = registro['data']
             horario = registro['horario']
 
-            # Se o horário estiver vazio, apaga o registro daquele dia específico.
             if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
-            # Se houver um horário (incluindo "Folga"), insere um novo ou atualiza o existente.
             else:
                 supabase.table('escalas').upsert({
                     'nome': nome,
@@ -123,7 +120,7 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 17.0 - Diagnóstico Final</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -173,8 +170,9 @@ if aba_principal == "Consultar minha escala":
                 st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
                 
                 if st.button("📥 Baixar em PDF"):
-                    # ... (código PDF)
-                    pass
+                    pdf = PDF()
+                    pdf.add_page()
+                    # (código PDF)
             else:
                 st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
 
@@ -200,7 +198,7 @@ elif aba_principal == "Área do Fiscal":
                         st.rerun()
                     else:
                         st.error("Código ou senha incorretos.")
-    else: # Se já estiver logado
+    else: 
         st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
         
         opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
@@ -229,6 +227,8 @@ elif aba_principal == "Área do Fiscal":
 
         elif aba_selecionada == "Editar Escala Semanal":
             st.subheader("✏️ Editar Escala Semanal")
+            st.warning("MODO DE DIAGNÓSTICO ATIVADO: O botão de salvar nesta tela **NÃO** salvará os dados. Ele apenas exibirá os dados que *seriam* salvos.")
+
             if df_colaboradores.empty:
                 st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' primeiro.")
             else:
@@ -251,29 +251,27 @@ elif aba_principal == "Área do Fiscal":
                         (df_escalas['data'].isin(datas_da_semana_ts))
                     ]
                     
-                    with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana.strftime('%Y%m%d')}"):
+                    with st.form(key=f"form_diag_{colaborador_selecionado}_{dia_inicio_semana.strftime('%Y%m%d')}"):
                         cols = st.columns(7)
                         for i, data_obj in enumerate(datas_da_semana_obj):
-                            dia_str = DIAS_SEMANA_PT[i]
-                            
                             horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
                             horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
-                            
                             index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
                             
                             with cols[i]:
                                 widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
                                 st.selectbox(
-                                    f"{dia_str} ({data_obj.strftime('%d/%m')})",
+                                    f"{DIAS_SEMANA_PT[i]} ({data_obj.strftime('%d/%m')})",
                                     options=HORARIOS_PADRAO,
                                     index=index_horario,
                                     key=widget_key 
                                 )
                         
-                        submitted = st.form_submit_button("Salvar Escala de " + colaborador_selecionado)
+                        submitted = st.form_submit_button("Analisar Dados para Salvar")
                         
                         if submitted:
-                            registros_para_salvar = []
+                            st.info("--- INICIANDO ANÁLISE DOS DADOS ---")
+                            registros_para_analise = []
                             for i, data_obj in enumerate(datas_da_semana_obj):
                                 widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
                                 novo_horario = st.session_state[widget_key]
@@ -283,17 +281,64 @@ elif aba_principal == "Área do Fiscal":
                                     "data": data_obj.strftime('%Y-%m-%d'),
                                     "horario": novo_horario
                                 }
-                                registros_para_salvar.append(registro)
+                                registros_para_analise.append(registro)
                             
-                            with st.spinner("Salvando..."):
-                                if salvar_escala_individual(registros_para_salvar):
-                                    st.cache_data.clear()
-                                    st.success("Escala salva com sucesso!")
-                                    time.sleep(1)
-                                    st.rerun()
+                            st.subheader("1. Dados que seriam enviados ao banco:")
+                            st.write("Verifique se os horários abaixo correspondem exatamente ao que você selecionou na tela.")
+                            st.json(registros_para_analise)
+                            
+                            st.warning("O salvamento real foi desativado. Esta é apenas uma exibição para diagnóstico.")
+                            st.balloons()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
+            
+            st.markdown("---")
+            st.subheader("🔬 Ferramentas de Diagnóstico do Banco de Dados")
+            st.write("Use estes botões para testar a comunicação com o banco de dados.")
+            
+            col_diag1, col_diag2, col_diag3 = st.columns(3)
+            
+            with col_diag1:
+                if st.button("Teste 1: Inserir Registro de Teste"):
+                    try:
+                        rand_num = random.randint(1000, 9999)
+                        nome_teste = f"TESTE_{rand_num}"
+                        data_teste = datetime.date.today().strftime('%Y-%m-%d')
+                        horario_teste = "12:34"
+                        st.write(f"Inserindo: {nome_teste}, {data_teste}, {horario_teste}")
+                        supabase.table('escalas').insert({"nome": nome_teste, "data": data_teste, "horario": horario_teste}).execute()
+                        st.success("SUCESSO: Inserção de teste funcionou!")
+                        st.cache_data.clear()
+                    except Exception as e:
+                        st.error("FALHA: Inserção de teste falhou.")
+                        st.exception(e)
+
+            with col_diag2:
+                if st.button("Teste 2: Ver Tabela 'escalas' Completa"):
+                    st.info("Buscando todos os dados da tabela 'escalas'...")
+                    try:
+                        response = supabase.table('escalas').select('*').order('data', desc=True).limit(100).execute()
+                        df_bruto = pd.DataFrame(response.data)
+                        st.success(f"Encontrados {len(df_bruto)} registros.")
+                        st.dataframe(df_bruto)
+                    except Exception as e:
+                        st.error("FALHA: Não foi possível ler os dados.")
+                        st.exception(e)
+            
+            with col_diag3:
+                if st.button("Teste 3: Limpar Registros de Teste"):
+                    try:
+                        st.write("Apagando registros cujo nome começa com 'TESTE_'...")
+                        supabase.table('escalas').delete().like('nome', 'TESTE_%').execute()
+                        st.success("SUCESSO: Limpeza de testes concluída!")
+                        st.cache_data.clear()
+                    except Exception as e:
+                        st.error("FALHA: Limpeza falhou.")
+                        st.exception(e)
+
+            st.markdown("---")
+            
             col1, col2 = st.columns([0.6, 0.4])
             with col1:
                 st.write("**Colaboradores Atuais:**")
