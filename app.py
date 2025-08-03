@@ -30,7 +30,7 @@ except Exception as e:
     st.stop()
 
 # --- Funções de Dados (usando Supabase) ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def carregar_colaboradores():
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
@@ -42,7 +42,7 @@ def carregar_colaboradores():
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)
 def carregar_escalas():
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
@@ -57,25 +57,11 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO CORRIGIDA ---
-def salvar_escala_semanal(df_semana_completa):
-    """Salva a escala de forma segura, tratando 'Folga' como um dado válido."""
+def salvar_escala_semanal(df_para_salvar, datas_da_semana_str):
     try:
-        for _, row in df_semana_completa.iterrows():
-            nome = row['nome']
-            data = row['data'].strftime('%Y-%m-%d')
-            horario = row['horario']
-
-            # Se o horário for limpo (APENAS vazio), apaga o registro daquele dia
-            if horario in ["", None]:
-                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
-            # Se houver um horário (INCLUINDO "Folga"), insere ou atualiza (upsert)
-            else:
-                supabase.table('escalas').upsert({
-                    'nome': nome,
-                    'data': data,
-                    'horario': horario
-                }, on_conflict='nome, data').execute()
+        supabase.table('escalas').delete().in_('data', datas_da_semana_str).execute()
+        if not df_para_salvar.empty:
+            supabase.table('escalas').insert(df_para_salvar.to_dict('records')).execute()
         return True
     except Exception as e:
         st.error(f"Erro ao salvar a escala: {e}")
@@ -300,11 +286,14 @@ elif aba_principal == "Área do Fiscal":
                             value_name='horario'
                         )
                         
-                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
+                        df_unpivoted.dropna(subset=['horario'], inplace=True)
+                        df_unpivoted = df_unpivoted[df_unpivoted['horario'] != ""]
+                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data']).dt.strftime('%Y-%m-%d')
                         
-                        if salvar_escala_semanal(df_unpivoted):
+                        datas_str = [d.strftime('%Y-%m-%d') for d in datas_da_semana]
+                        if salvar_escala_semanal(df_unpivoted, datas_str):
                             st.cache_data.clear()
-                            st.success("Escala da semana salva com sucesso!")
+                            st.success("Escala salva com sucesso na nuvem!")
                             st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
