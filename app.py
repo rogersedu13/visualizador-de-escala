@@ -12,8 +12,9 @@ import time
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
-    "9:00 HRS", "9:30 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
-    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "Ferias", "Atestado", "Afastado(a)"
+    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
+    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS",
+        "Ferias", "Atestado", "Afastado(a)"
 ]
 
 # --- Configuração da Página ---
