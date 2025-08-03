@@ -6,14 +6,14 @@ from supabase import create_client, Client
 import base64
 from io import BytesIO
 from fpdf import FPDF
+import time
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
-    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
-    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS",
-    "15:00 HRS", "15:30 HRS", "16:00 HRS", "Atestado", "Afastado(a)", "Ferias",
+    "9:00 HRS", "9:30 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
+    "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS"
 ]
 
 # --- Configuração da Página ---
@@ -57,7 +57,6 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- NOVA FUNÇÃO DE SALVAMENTO SEGURA ---
 def salvar_escala_semanal(df_semana_completa):
     """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
@@ -66,10 +65,8 @@ def salvar_escala_semanal(df_semana_completa):
             data = row['data'].strftime('%Y-%m-%d')
             horario = row['horario']
 
-            # Se o horário for limpo (vazio), apaga o registro daquele dia
             if horario in ["", None]:
                 supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
-            # Se houver um horário (incluindo "Folga"), insere ou atualiza (upsert)
             else:
                 supabase.table('escalas').upsert({
                     'nome': nome,
@@ -78,7 +75,8 @@ def salvar_escala_semanal(df_semana_completa):
                 }, on_conflict='nome, data').execute()
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar a escala: {e}")
+        # Mensagem de erro mais detalhada
+        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
         return False
 
 def adicionar_colaborador(nome):
@@ -123,7 +121,7 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 6.2 - Modo de Diagnóstico</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -289,23 +287,40 @@ elif aba_principal == "Área do Fiscal":
                         key="editor_grade_semanal"
                     )
 
+                    # --- BLOCO DE DIAGNÓSTICO ---
                     if st.button("Salvar Escala da Semana", type="primary"):
-                        mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
-                        df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
+                        with st.spinner("Processando e salvando a escala... Por favor, aguarde."):
+                            st.info("✅ Passo 1: O botão foi clicado. Preparando os dados...")
+                            time.sleep(1) # Pequena pausa para a mensagem aparecer
+                            
+                            mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
+                            df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
 
-                        df_unpivoted = df_editado.melt(
-                            id_vars=['nome'], 
-                            value_vars=datas_da_semana,
-                            var_name='data', 
-                            value_name='horario'
-                        )
-                        
-                        df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
-                        
-                        if salvar_escala_semanal(df_unpivoted):
-                            st.cache_data.clear()
-                            st.success("Escala da semana salva com sucesso!")
-                            st.rerun()
+                            df_unpivoted = df_editado.melt(
+                                id_vars=['nome'], 
+                                value_vars=datas_da_semana,
+                                var_name='data', 
+                                value_name='horario'
+                            )
+                            df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
+                            
+                            st.write("Dados que serão enviados para a função de salvamento:")
+                            st.dataframe(df_unpivoted)
+                            
+                            st.info("✅ Passo 2: Dados preparados. Chamando a função para salvar no banco de dados...")
+                            time.sleep(1)
+                            
+                            save_successful = salvar_escala_semanal(df_unpivoted)
+                            
+                            if save_successful:
+                                st.info("✅ Passo 3: A função de salvamento foi concluída com SUCESSO.")
+                                st.cache_data.clear()
+                                st.success("Escala da semana salva com sucesso!")
+                                st.info("Recarregando a página em 3 segundos...")
+                                time.sleep(3)
+                                st.rerun()
+                            else:
+                                st.error("❌ Passo 3: A função de salvamento retornou FALHA. Verifique a mensagem de erro detalhada que pode ter aparecido acima.")
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
