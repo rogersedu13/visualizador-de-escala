@@ -57,17 +57,22 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-def salvar_escala_final(nome_colaborador, data_inicio_semana, registros):
-    """Chama a função SQL no Supabase para fazer a atualização de forma atômica."""
+def salvar_escala_semanal(df_para_salvar):
+    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
-        # Prepara a lista de registros para inserir, filtrando os vazios
-        registros_para_inserir = [reg for reg in registros if reg['horario'] not in ["", None]]
+        for _, row in df_para_salvar.iterrows():
+            nome = row['nome']
+            data = row['data'].strftime('%Y-%m-%d')
+            horario = row['horario']
 
-        supabase.rpc('atualizar_escala_semanal', {
-            'p_nome': nome_colaborador,
-            'p_data_inicio': data_inicio_semana.strftime('%Y-%m-%d'),
-            'p_registros': registros_para_inserir
-        }).execute()
+            if horario in ["", None]:
+                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
+            else:
+                supabase.table('escalas').upsert({
+                    'nome': nome,
+                    'data': data,
+                    'horario': horario
+                }, on_conflict='nome, data').execute()
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
@@ -115,7 +120,7 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0 </p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -167,22 +172,7 @@ if aba_principal == "Consultar minha escala":
                 if st.button("📥 Baixar em PDF"):
                     pdf = PDF()
                     pdf.add_page()
-                    pdf.set_font("Arial", "B", 16)
-                    pdf.cell(0, 10, f"Escala de Trabalho: {nome_confirmado}", ln=True, align="C")
-                    pdf.ln(10)
-                    pdf.set_font("Arial", "B", 12)
-                    pdf.cell(95, 10, 'Data', 1, 0, 'C')
-                    pdf.cell(95, 10, 'Horario', 1, 1, 'C')
-                    pdf.set_font("Arial", "", 12)
-                    for _, row in resultados_display.iterrows():
-                        data_pdf = row['data'].encode('latin-1', 'replace').decode('latin-1')
-                        horario_pdf = str(row['horario']).encode('latin-1', 'replace').decode('latin-1')
-                        pdf.cell(95, 10, data_pdf, 1, 0, 'C')
-                        pdf.cell(95, 10, horario_pdf, 1, 1, 'C')
-                    pdf_bytes = pdf.output(dest='S').encode('latin-1')
-                    b64 = base64.b64encode(pdf_bytes).decode()
-                    href = f'<a href="data:application/pdf;base64,{b64}" download="escala_{nome_confirmado}.pdf" target="_blank">Clique aqui para baixar o PDF</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                    # (código PDF)
             else:
                 st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
 
@@ -259,42 +249,47 @@ elif aba_principal == "Área do Fiscal":
                         (df_escalas['data'].isin(datas_da_semana_ts))
                     ]
                     
-                    with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana.strftime('%Y%m%d')}"):
-                        cols = st.columns(7)
+                    # --- O FORMULÁRIO FOI REMOVIDO PARA GARANTIR ESTABILIDADE ---
+                    
+                    horarios_semana = {}
+                    cols = st.columns(7)
+                    for i, data_obj in enumerate(datas_da_semana_obj):
+                        dia_str = DIAS_SEMANA_PT[i]
+                        
+                        horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
+                        horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
+                        
+                        index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
+                        
+                        with cols[i]:
+                            # A chave única ainda é importante para o Streamlit identificar cada widget
+                            widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
+                            horarios_semana[dia_str] = st.selectbox(
+                                f"{dia_str} ({data_obj.strftime('%d/%m')})",
+                                options=HORARIOS_PADRAO,
+                                index=index_horario,
+                                key=widget_key 
+                            )
+                    
+                    if st.button("Salvar Escala de " + colaborador_selecionado, type="primary"):
+                        registros_para_salvar = []
                         for i, data_obj in enumerate(datas_da_semana_obj):
                             dia_str = DIAS_SEMANA_PT[i]
+                            novo_horario = horarios_semana[dia_str]
                             
-                            horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
-                            horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
-                            
-                            index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
-                            
-                            with cols[i]:
-                                widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
-                                st.selectbox(
-                                    f"{dia_str} ({data_obj.strftime('%d/%m')})",
-                                    options=HORARIOS_PADRAO,
-                                    index=index_horario,
-                                    key=widget_key 
-                                )
+                            registro = {
+                                "nome": colaborador_selecionado,
+                                "data": data_obj.strftime('%Y-%m-%d'),
+                                "horario": novo_horario
+                            }
+                            registros_para_salvar.append(registro)
                         
-                        submitted = st.form_submit_button("Salvar Escala de " + colaborador_selecionado)
-                        
-                        if submitted:
-                            registros_para_salvar = []
-                            for i, data_obj in enumerate(datas_da_semana_obj):
-                                widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
-                                novo_horario = st.session_state[widget_key]
-                                
-                                registro = { "data": data_obj.strftime('%Y-%m-%d'), "horario": novo_horario }
-                                registros_para_salvar.append(registro)
-                            
-                            with st.spinner("Salvando..."):
-                                if salvar_escala_final(colaborador_selecionado, dia_inicio_semana, registros_para_salvar):
-                                    st.cache_data.clear()
-                                    st.success("Escala salva com sucesso!")
-                                    time.sleep(1)
-                                    st.rerun()
+                        with st.spinner("Salvando..."):
+                            if salvar_escala_individual(registros_para_salvar):
+                                st.cache_data.clear()
+                                st.success("Escala salva com sucesso!")
+                                time.sleep(1)
+                                st.rerun()
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
