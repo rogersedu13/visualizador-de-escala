@@ -7,7 +7,6 @@ import base64
 from io import BytesIO
 from fpdf import FPDF
 import time
-import random
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -33,7 +32,7 @@ except Exception as e:
     st.stop()
 
 # --- Funções de Dados (usando Supabase) ---
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=30)
 def carregar_colaboradores():
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
@@ -43,7 +42,7 @@ def carregar_colaboradores():
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=30)
 def carregar_escalas():
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
@@ -58,22 +57,30 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-def salvar_escala_individual(registros_para_salvar):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
+# --- FUNÇÃO DE SALVAMENTO FINAL E SIMPLIFICADA ---
+def salvar_escala_final(registros_da_semana):
+    """Apaga todos os registros da semana para um colaborador e insere os novos."""
     try:
-        for registro in registros_para_salvar:
-            nome = registro['nome']
-            data = registro['data']
-            horario = registro['horario']
+        if not registros_da_semana:
+            return True # Nada a fazer
 
-            if horario in ["", None]:
-                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
-            else:
-                supabase.table('escalas').upsert({
-                    'nome': nome,
-                    'data': data,
-                    'horario': horario
-                }, on_conflict='nome, data').execute()
+        nome_colaborador = registros_da_semana[0]['nome']
+        datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
+
+        # Passo 1: Deleção segura e específica para o colaborador e a semana em questão.
+        supabase.table('escalas').delete().match({
+            'nome': nome_colaborador
+        }).in_('data', datas_da_semana_str).execute()
+        
+        # Passo 2: Prepara a lista de novos registros para inserir (filtrando os vazios)
+        registros_para_inserir = [
+            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
+        ]
+
+        # Passo 3: Insere os novos registros em um único comando, se houver algum.
+        if registros_para_inserir:
+            supabase.table('escalas').insert(registros_para_inserir).execute()
+            
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
@@ -121,7 +128,7 @@ df_escalas = carregar_escalas()
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
-st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 18.1 - Teste Final de Permissões</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.0</p>", unsafe_allow_html=True)
 
 st.sidebar.title("Modo de Acesso")
 aba_principal = st.sidebar.radio("", ["Consultar minha escala", "Área do Fiscal"])
@@ -214,7 +221,7 @@ elif aba_principal == "Área do Fiscal":
                         st.rerun()
                     else:
                         st.error("Código ou senha incorretos.")
-    else: 
+    else: # Se já estiver logado
         st.header(f"Bem-vindo, {st.session_state.get('nome_logado', '')}!")
         
         opcoes_abas = ["Visão Geral da Escala", "Editar Escala Semanal", "Gerenciar Colaboradores"]
@@ -300,7 +307,7 @@ elif aba_principal == "Área do Fiscal":
                                 registros_para_salvar.append(registro)
                             
                             with st.spinner("Salvando..."):
-                                if salvar_escala_individual(registros_para_salvar):
+                                if salvar_escala_final(registros_para_salvar):
                                     st.cache_data.clear()
                                     st.success("Escala salva com sucesso!")
                                     time.sleep(1)
@@ -308,56 +315,6 @@ elif aba_principal == "Área do Fiscal":
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
-
-            st.markdown("---")
-            st.subheader("🔬 Teste Final de Permissões do Banco de Dados")
-            st.warning("Execute os testes na ordem para diagnosticar o problema.")
-            
-            col_diag1, col_diag2, col_diag3 = st.columns(3)
-            
-            with col_diag1:
-                if st.button("Passo 1: Tentar INSERIR um registro de teste"):
-                    try:
-                        nome_teste = f"TESTE_INSERCAO_{int(time.time())}"
-                        data_teste = datetime.date.today().strftime('%Y-%m-%d')
-                        horario_teste = "12:34:56"
-                        st.write(f"Inserindo: {nome_teste}...")
-                        response = supabase.table('escalas').insert({"nome": nome_teste, "data": data_teste, "horario": horario_teste}).execute()
-                        st.success("SUCESSO: Comando de inserção foi enviado!")
-                        st.write("Resposta do Supabase:")
-                        st.json(response.data if hasattr(response, 'data') else str(response))
-                        st.cache_data.clear()
-                    except Exception as e:
-                        st.error("FALHA: Inserção de teste falhou com um erro.")
-                        st.exception(e)
-
-            with col_diag2:
-                if st.button("Passo 2: VERIFICAR se o registro de teste existe"):
-                    st.info("Buscando por registros com nome começando com 'TESTE_INSERCAO'...")
-                    try:
-                        response = supabase.table('escalas').select('*').like('nome', 'TESTE_INSERCAO%').execute()
-                        df_test = pd.DataFrame(response.data)
-                        if df_test.empty:
-                            st.error("VERIFICAÇÃO FALHOU: Nenhum registro de teste foi encontrado no banco de dados.")
-                        else:
-                            st.success("VERIFICAÇÃO OK: O registro de teste foi encontrado!")
-                            st.dataframe(df_test)
-                    except Exception as e:
-                        st.error("O comando SELECT FALHOU com um erro:")
-                        st.exception(e)
-            
-            with col_diag3:
-                if st.button("Passo 3: Limpar Registros de Teste"):
-                    try:
-                        st.write("Apagando registros cujo nome começa com 'TESTE_INSERCAO_'...")
-                        supabase.table('escalas').delete().like('nome', 'TESTE_INSERCAO_%').execute()
-                        st.success("SUCESSO: Limpeza de testes concluída!")
-                        st.cache_data.clear()
-                    except Exception as e:
-                        st.error("FALHA: Limpeza falhou.")
-                        st.exception(e)
-            st.markdown("---")
-            
             col1, col2 = st.columns([0.6, 0.4])
             with col1:
                 st.write("**Colaboradores Atuais:**")
