@@ -246,8 +246,6 @@ elif aba_principal == "Área do Fiscal":
             if df_colaboradores.empty:
                 st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores' antes de editar as escalas.")
             else:
-                # --- O FORMULÁRIO FOI REMOVIDO DAQUI PARA GARANTIR ESTABILIDADE ---
-                
                 dia_selecionado = st.date_input("Selecione qualquer dia da semana que deseja editar:", datetime.date.today(), key="seletor_semana")
                 
                 dia_inicio_semana = dia_selecionado - timedelta(days=dia_selecionado.weekday())
@@ -283,12 +281,14 @@ elif aba_principal == "Área do Fiscal":
                     for col_amigavel in sorted(mapa_nomes_colunas.values()):
                         column_config[col_amigavel] = st.column_config.SelectboxColumn(col_amigavel, options=HORARIOS_PADRAO)
 
+                    # --- CORREÇÃO FINAL: Chave do editor agora é única para cada semana ---
+                    editor_key = f"editor_{dia_inicio_semana.strftime('%Y%m%d')}"
                     df_editado = st.data_editor(
                         grade_display,
                         column_config=column_config,
                         use_container_width=True,
                         hide_index=True,
-                        key="editor_grade_semanal"
+                        key=editor_key
                     )
                 
                 if st.button("Salvar Escala da Semana", type="primary"):
