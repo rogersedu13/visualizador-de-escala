@@ -59,21 +59,26 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO FINAL E SEGURA ---
-def salvar_escala_semanal_final(df_para_inserir, nomes_dos_colaboradores, datas_da_semana_str):
-    """Apaga apenas os dados da semana para os colaboradores listados e insere os novos dados."""
+def salvar_escala_semanal(df_semana_completa):
+    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
     try:
-        # Passo 1: Deleção segura e específica
-        supabase.table('escalas').delete().in_('nome', nomes_dos_colaboradores).in_('data', datas_da_semana_str).execute()
-        
-        # Passo 2: Insere os novos dados se houver algo para inserir
-        if not df_para_inserir.empty:
-            supabase.table('escalas').insert(df_para_inserir.to_dict('records')).execute()
+        for _, row in df_semana_completa.iterrows():
+            nome = row['nome']
+            data = row['data'].strftime('%Y-%m-%d')
+            horario = row['horario']
+
+            if horario in ["", "Folga", None]:
+                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
+            else:
+                supabase.table('escalas').upsert({
+                    'nome': nome,
+                    'data': data,
+                    'horario': horario
+                }, on_conflict='nome, data').execute()
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
         return False
-
 
 def adicionar_colaborador(nome):
     try:
@@ -284,7 +289,7 @@ elif aba_principal == "Área do Fiscal":
                     )
 
                     if st.button("Salvar Escala da Semana", type="primary"):
-                        with st.spinner("Processando..."):
+                        with st.spinner("Processando e salvando a escala..."):
                             mapa_reverso_colunas = {v: k for k, v in mapa_nomes_colunas.items()}
                             df_editado.rename(columns=mapa_reverso_colunas, inplace=True)
 
@@ -294,20 +299,19 @@ elif aba_principal == "Área do Fiscal":
                                 var_name='data', 
                                 value_name='horario'
                             )
+                            df_unpivoted['data'] = pd.to_datetime(df_unpivoted['data'])
                             
-                            # Filtra apenas os registros que precisam ser salvos (não vazios)
-                            df_para_inserir = df_unpivoted[df_unpivoted['horario'].isin(["", None]) == False].copy()
-                            df_para_inserir['data'] = pd.to_datetime(df_para_inserir['data']).dt.strftime('%Y-%m-%d')
+                            # --- CORREÇÃO APLICADA AQUI ---
+                            # O nome da função de salvamento foi corrigido
+                            save_successful = salvar_escala_semanal(df_unpivoted)
                             
-                            # Prepara os dados para a função de salvamento
-                            nomes_na_grade = df_editado['nome'].tolist()
-                            datas_str = [d.strftime('%Y-%m-%d') for d in datas_da_semana]
-
-                            if salvar_escala_semanal_final(df_para_inserir, nomes_na_grade, datas_str):
+                            if save_successful:
                                 st.cache_data.clear()
                                 st.success("Escala da semana salva com sucesso!")
-                                time.sleep(1)
+                                time.sleep(1) # Pausa para o usuário ver a mensagem
                                 st.rerun()
+                            else:
+                                st.error("A função de salvamento FALHOU. Verifique a mensagem de erro detalhada acima.")
 
         elif aba_selecionada == "Gerenciar Colaboradores":
             st.subheader("👥 Gerenciar Colaboradores")
