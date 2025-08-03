@@ -259,7 +259,6 @@ elif aba_principal == "Área do Fiscal":
                     ]
                     
                     with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana}"):
-                        horarios_semana = {}
                         cols = st.columns(7)
                         for i, data_obj in enumerate(datas_da_semana_obj):
                             dia_str = DIAS_SEMANA_PT[i]
@@ -270,20 +269,23 @@ elif aba_principal == "Área do Fiscal":
                             index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
                             
                             with cols[i]:
-                                horarios_semana[dia_str] = st.selectbox(
+                                # Apenas criamos os widgets. Não guardamos o valor deles aqui.
+                                st.selectbox(
                                     f"{dia_str} ({data_obj.strftime('%d/%m')})",
                                     options=HORARIOS_PADRAO,
                                     index=index_horario,
-                                    key=f"horario_{i}"
+                                    key=f"horario_{i}" # A chave é o mais importante
                                 )
                         
                         submitted = st.form_submit_button("Salvar Escala de " + colaborador_selecionado)
                         
                         if submitted:
                             registros_para_salvar = []
+                            # --- CORREÇÃO APLICADA AQUI ---
+                            # Lemos os valores dos widgets usando a chave deles no st.session_state
                             for i, data_obj in enumerate(datas_da_semana_obj):
-                                dia_str = DIAS_SEMANA_PT[i]
-                                novo_horario = horarios_semana[dia_str]
+                                widget_key = f"horario_{i}"
+                                novo_horario = st.session_state[widget_key]
                                 
                                 registro = {
                                     "nome": colaborador_selecionado,
