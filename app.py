@@ -3,11 +3,11 @@ import pandas as pd
 import datetime
 from datetime import timedelta
 from supabase import create_client, Client
+import random
+import time
+from fpdf import FPDF
 import base64
 from io import BytesIO
-from fpdf import FPDF
-import time
-import random
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -32,24 +32,19 @@ except Exception as e:
     st.stop()
 
 # --- Gerenciamento de Estado e Cache ---
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-if "nome_logado" not in st.session_state:
-    st.session_state.nome_logado = ""
-if "cache_key" not in st.session_state:
-    st.session_state.cache_key = str(random.randint(1, 1000000))
+if "logado" not in st.session_state: st.session_state.logado = False
+if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
+if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.randint(1, 1000000))
 
 def invalidate_cache():
-    """Força a invalidação do cache gerando uma nova chave."""
     st.session_state.cache_key = str(random.randint(1, 1000000))
 
-# --- Funções de Dados ---
+# --- Funções de Dados (RPC) ---
 @st.cache_data(ttl=600)
 def carregar_colaboradores(cache_key):
     try:
-        response = supabase.table('colaboradores').select('nome').order('nome').execute()
-        df = pd.DataFrame(response.data)
-        return df if not df.empty else pd.DataFrame(columns=['nome'])
+        response = supabase.rpc('get_colaboradores').execute()
+        return pd.DataFrame(response.data)
     except Exception as e:
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
@@ -57,10 +52,8 @@ def carregar_colaboradores(cache_key):
 @st.cache_data(ttl=600)
 def carregar_escalas(cache_key):
     try:
-        response = supabase.table('escalas').select('nome, data, horario').execute()
+        response = supabase.rpc('get_escalas').execute()
         df = pd.DataFrame(response.data)
-        if df.empty:
-            return pd.DataFrame(columns=['nome', 'data', 'horario'])
         if 'data' in df.columns:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
         return df
@@ -69,13 +62,8 @@ def carregar_escalas(cache_key):
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
 def salvar_dia_individual(nome, data, horario):
-    """Salva, atualiza ou apaga a escala para um único dia de um único colaborador."""
     try:
-        data_str = data.strftime('%Y-%m-%d')
-        if horario in ["", None]:
-            supabase.table('escalas').delete().match({'nome': nome, 'data': data_str}).execute()
-        else:
-            supabase.table('escalas').upsert({'nome': nome, 'data': data_str, 'horario': horario}, on_conflict='nome, data').execute()
+        supabase.rpc('save_escala_dia', {'p_nome': nome, 'p_data': data.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
@@ -83,7 +71,7 @@ def salvar_dia_individual(nome, data, horario):
 
 def adicionar_colaborador(nome):
     try:
-        supabase.table('colaboradores').insert({"nome": nome}).execute()
+        supabase.rpc('add_colaborador', {'p_nome': nome}).execute()
         return True
     except Exception as e:
         st.error(f"Erro ao adicionar colaborador: {e}")
@@ -91,8 +79,7 @@ def adicionar_colaborador(nome):
 
 def remover_colaboradores(lista_nomes):
     try:
-        supabase.table('colaboradores').delete().in_('nome', lista_nomes).execute()
-        supabase.table('escalas').delete().in_('nome', lista_nomes).execute()
+        supabase.rpc('delete_colaboradores', {'p_nomes': lista_nomes}).execute()
         return True
     except Exception as e:
         st.error(f"Erro ao remover colaboradores: {e}")
@@ -105,15 +92,15 @@ def formatar_data_manual(data_timestamp):
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
-# --- Funções de Interface (Componentes das Abas) ---
+# --- Funções de Interface ---
 def aba_consultar_escala(df_colaboradores, df_escalas):
     st.header("🔎 Buscar minha escala")
     nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
     if not nomes_disponiveis:
-        st.warning("Nenhum(a) colaborador(a) cadastrado(a) no sistema. Fale com o fiscal.")
+        st.warning("Nenhum(a) colaborador(a) cadastrado(a).")
         return
 
-    nome_digitado = st.text_input("Digite seu nome para buscar:", placeholder="Comece a digitar seu nome aqui...")
+    nome_digitado = st.text_input("Digite seu nome para buscar:", placeholder="Comece a digitar...")
     if nome_digitado:
         sugestoes = [n for n in nomes_disponiveis if nome_digitado.lower() in n.lower()]
         if sugestoes:
@@ -123,19 +110,18 @@ def aba_consultar_escala(df_colaboradores, df_escalas):
                 data_fim = hoje + timedelta(days=30)
                 st.info(f"Mostrando sua escala para **{nome_confirmado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
                 
+                resultados = pd.DataFrame()
                 if not df_escalas.empty:
                     resultados = df_escalas[(df_escalas["nome"].str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
-                else:
-                    resultados = pd.DataFrame()
 
                 if not resultados.empty:
                     resultados_display = resultados.copy()
                     resultados_display["data"] = resultados_display["data"].apply(formatar_data_manual)
                     st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
                 else:
-                    st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
+                    st.success(f"**{nome_confirmado}**, você não possui escalas agendadas.")
         else:
-            st.warning("Nenhum nome correspondente encontrado. Verifique a digitação.")
+            st.warning("Nenhum nome correspondente encontrado.")
 
 def aba_visao_geral(df_escalas):
     st.subheader("🗓️ Visão Geral da Escala")
@@ -144,10 +130,9 @@ def aba_visao_geral(df_escalas):
         data_fim_visao = data_inicio_visao + timedelta(days=6)
         st.info(f"Mostrando escalas de {data_inicio_visao.strftime('%d/%m')} a {data_fim_visao.strftime('%d/%m')}")
         
+        df_view = pd.DataFrame()
         if not df_escalas.empty:
             df_view = df_escalas[(df_escalas['data'] >= pd.to_datetime(data_inicio_visao)) & (df_escalas['data'] <= pd.to_datetime(data_fim_visao))].copy()
-        else:
-            df_view = pd.DataFrame()
 
         if df_view.empty:
             st.info("Nenhuma escala encontrada para este período.")
@@ -163,7 +148,7 @@ def aba_editar_escala(df_colaboradores, df_escalas):
 
     col1, col2 = st.columns(2)
     with col1:
-        nomes_lista = [""] + df_colaboradores["nome"].tolist()
+        nomes_lista = df_colaboradores["nome"].tolist()
         colaborador_selecionado = st.selectbox("1. Selecione o colaborador:", nomes_lista)
     with col2:
         data_selecionada = st.date_input("2. Selecione a data para editar:")
@@ -204,8 +189,7 @@ def aba_gerenciar_colaboradores(df_colaboradores):
                     invalidate_cache()
                     st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
                     st.rerun()
-            else:
-                st.error("Nome inválido ou já existente.")
+            else: st.error("Nome inválido ou já existente.")
         
         st.write("**Remover colaborador(a):**")
         if not df_colaboradores.empty:
@@ -217,68 +201,50 @@ def aba_gerenciar_colaboradores(df_colaboradores):
                         st.success("Colaboradores removidos com sucesso!")
                         st.rerun()
 
-# --- Estrutura Principal da Aplicação ---
+# --- MAIN APP ---
 def main():
     st.title("📅 Visualizador de Escala")
     st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.2</p>", unsafe_allow_html=True)
     
+    # Carrega os dados usando a chave de cache da sessão
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores(st.session_state.cache_key)
     df_escalas = carregar_escalas(st.session_state.cache_key)
 
     st.sidebar.title("Modo de Acesso")
     if not st.session_state.logado:
-        # TELA DE LOGIN
         with st.sidebar.form("login_form"):
             st.header("🔐 Acesso Fiscal")
             codigo = st.text_input("Código do fiscal")
             senha = st.text_input("Senha", type="password")
             if st.form_submit_button("Entrar", use_container_width=True):
-                if not codigo or not senha:
-                    st.warning("Por favor, preencha o código e a senha.")
-                elif not codigo.isdigit():
-                    st.error("Código inválido.")
-                else:
-                    fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))]
-                    if not fiscal_auth.empty:
-                        st.session_state.logado = True
-                        st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]
-                        st.rerun()
-                    else:
-                        st.error("Código ou senha incorretos.")
+                fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))] if codigo.isdigit() else pd.DataFrame()
+                if not fiscal_auth.empty:
+                    st.session_state.logado = True
+                    st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]
+                    st.rerun()
+                else: st.sidebar.error("Código ou senha incorretos.")
         
         st.sidebar.markdown("---")
         aba_consultar_escala(df_colaboradores, df_escalas)
     
-    else: # SE ESTIVER LOGADO
+    else:
         st.sidebar.success(f"Logado como: {st.session_state.nome_logado}")
         if st.sidebar.button("Logout", use_container_width=True):
             st.session_state.logado = False
-            st.session_state.nome_logado = ""
+            invalidate_cache()
             st.rerun()
         
         opcoes_abas = ["Visão Geral da Escala", "Editar Escala", "Gerenciar Colaboradores", "Consultar Escala"]
         aba_selecionada = st.radio("Navegação", opcoes_abas, horizontal=True, label_visibility="collapsed")
         
-        if aba_selecionada == "Visão Geral da Escala":
-            aba_visao_geral(df_escalas)
-        elif aba_selecionada == "Editar Escala":
-            aba_editar_escala(df_colaboradores, df_escalas)
-        elif aba_selecionada == "Gerenciar Colaboradores":
-            aba_gerenciar_colaboradores(df_colaboradores)
-        elif aba_selecionada == "Consultar Escala":
-            aba_consultar_escala(df_colaboradores, df_escalas)
+        if aba_selecionada == "Visão Geral da Escala": aba_visao_geral(df_escalas)
+        elif aba_selecionada == "Editar Escala": aba_editar_escala(df_colaboradores, df_escalas)
+        elif aba_selecionada == "Gerenciar Colaboradores": aba_gerenciar_colaboradores(df_colaboradores)
+        elif aba_selecionada == "Consultar Escala": aba_consultar_escala(df_colaboradores, df_escalas)
 
-    # --- RODAPÉ ---
     st.markdown("---")
-    st.markdown(
-        """
-        <p style='text-align: center; color: grey;'>
-            Desenvolvido por @Rogério Souza
-        </p>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("""<p style='text-align: center; color: grey;'>Desenvolvido por @Rogério Souza</p>""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
