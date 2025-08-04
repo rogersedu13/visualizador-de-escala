@@ -7,6 +7,7 @@ import base64
 from io import BytesIO
 from fpdf import FPDF
 import time
+import random
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -31,9 +32,17 @@ except Exception as e:
     st.info("Certifique-se de que os nomes nos Secrets são 'supabase_url' e 'supabase_key'.")
     st.stop()
 
-# --- Funções de Dados (usando Supabase) ---
-@st.cache_data(ttl=30)
-def carregar_colaboradores():
+# --- Gerenciamento de Cache ---
+if "cache_key" not in st.session_state:
+    st.session_state.cache_key = str(random.randint(1, 1000000))
+
+def invalidate_cache():
+    """Força a invalidação do cache gerando uma nova chave."""
+    st.session_state.cache_key = str(random.randint(1, 1000000))
+
+# --- Funções de Dados (usando a chave de cache) ---
+@st.cache_data(ttl=600)
+def carregar_colaboradores(cache_key):
     try:
         response = supabase.table('colaboradores').select('nome').order('nome').execute()
         df = pd.DataFrame(response.data)
@@ -42,8 +51,8 @@ def carregar_colaboradores():
         st.error(f"Erro ao carregar colaboradores: {e}")
         return pd.DataFrame(columns=['nome'])
 
-@st.cache_data(ttl=30)
-def carregar_escalas():
+@st.cache_data(ttl=600)
+def carregar_escalas(cache_key):
     try:
         response = supabase.table('escalas').select('nome, data, horario').execute()
         df = pd.DataFrame(response.data)
@@ -58,7 +67,6 @@ def carregar_escalas():
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
 def salvar_escala_final(registros_da_semana):
-    """Apaga todos os registros da semana para um colaborador e insere os novos."""
     try:
         if not registros_da_semana:
             return True
@@ -66,13 +74,9 @@ def salvar_escala_final(registros_da_semana):
         nome_colaborador = registros_da_semana[0]['nome']
         datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
 
-        supabase.table('escalas').delete().match({
-            'nome': nome_colaborador
-        }).in_('data', datas_da_semana_str).execute()
+        supabase.table('escalas').delete().match({'nome': nome_colaborador}).in_('data', datas_da_semana_str).execute()
         
-        registros_para_inserir = [
-            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
-        ]
+        registros_para_inserir = [reg for reg in registros_da_semana if reg['horario'] not in ["", None]]
 
         if registros_para_inserir:
             supabase.table('escalas').insert(registros_para_inserir).execute()
@@ -111,16 +115,9 @@ def formatar_data_manual(data_timestamp):
     dia_semana_str = DIAS_SEMANA_PT[data_timestamp.weekday()]
     return data_timestamp.strftime(f'%d/%m/%Y ({dia_semana_str})')
 
-# --- Classe para Geração de PDF ---
-class PDF(FPDF):
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Arial", "I", 8)
-        self.cell(0, 10, "Boa Semana e Bom Trabalho", 0, 0, "C")
-
 # --- Carregamento inicial dos dados ---
-df_colaboradores = carregar_colaboradores()
-df_escalas = carregar_escalas()
+df_colaboradores = carregar_colaboradores(st.session_state.cache_key)
+df_escalas = carregar_escalas(st.session_state.cache_key)
 
 # --- Interface Principal ---
 st.title("📅 Visualizador de Escala")
@@ -133,13 +130,6 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if st.session_state.logado:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Forçar Atualização de Dados", use_container_width=True):
-        st.cache_data.clear()
-        st.success("Cache de dados limpo. Recarregando...")
-        time.sleep(1)
-        st.rerun()
-    
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
@@ -181,7 +171,7 @@ if aba_principal == "Consultar minha escala":
                 st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
                 
                 if st.button("📥 Baixar em PDF"):
-                    pdf = PDF()
+                    pdf = FPDF() # Corrigido para usar a classe FPDF
                     pdf.add_page()
                     # (código PDF)
             else:
@@ -293,7 +283,7 @@ elif aba_principal == "Área do Fiscal":
                             
                             with st.spinner("Salvando..."):
                                 if salvar_escala_final(registros_para_salvar):
-                                    st.cache_data.clear()
+                                    invalidate_cache()
                                     st.success("Escala salva com sucesso!")
                                     time.sleep(1)
                                     st.rerun()
@@ -310,7 +300,7 @@ elif aba_principal == "Área do Fiscal":
                 if st.button("Adicionar Colaborador(a)"):
                     if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
                         if adicionar_colaborador(novo_nome):
-                            st.cache_data.clear()
+                            invalidate_cache()
                             st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
                             st.rerun()
                     else:
@@ -322,7 +312,7 @@ elif aba_principal == "Área do Fiscal":
                     if st.button("Remover Selecionados", type="secondary"):
                         if nomes_para_remover:
                             if remover_colaboradores(nomes_para_remover):
-                                st.cache_data.clear()
+                                invalidate_cache()
                                 st.success("Colaboradores removidos com sucesso!")
                                 st.rerun()
 
