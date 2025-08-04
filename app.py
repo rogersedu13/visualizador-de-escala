@@ -4,9 +4,7 @@ import datetime
 from datetime import timedelta
 from streamlit_gsheets import GSheetsConnection
 import time
-from fpdf import FPDF
-import base64
-from io import BytesIO
+import gspread_dataframe as gd
 import random
 
 # --- Constantes ---
@@ -36,7 +34,6 @@ if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.randint(1, 1000000))
 
 def invalidate_cache():
-    """Força a invalidação do cache gerando uma nova chave."""
     st.session_state.cache_key = str(random.randint(1, 1000000))
 
 # --- Funções de Dados (usando Google Sheets) ---
@@ -51,14 +48,22 @@ def carregar_dados(worksheet_name, columns, _cache_key):
     except Exception as e:
         return pd.DataFrame(columns=columns)
 
-def salvar_dados(worksheet_name, df_atualizado):
+# --- NOVA FUNÇÃO DE SALVAMENTO DE ACESSO DIRETO ---
+def salvar_dados_direto(worksheet_name, df_atualizado):
     try:
+        spreadsheet = conn.instance.open(st.secrets["connections"]["gsheets"]["spreadsheet"])
+        worksheet = spreadsheet.worksheet(worksheet_name)
+        
+        # Converte a coluna de data para string no formato correto
         if 'data' in df_atualizado.columns:
-            df_atualizado['data'] = pd.to_datetime(df_atualizado['data']).dt.strftime('%Y-%m-%d %H:%M:%S')
-        conn.update(worksheet=worksheet_name, data=df_atualizado)
+            df_atualizado['data'] = pd.to_datetime(df_atualizado['data']).dt.strftime('%Y-%m-%d')
+
+        worksheet.clear()
+        gd.set_with_dataframe(worksheet, df_atualizado, resize=True)
         return True
     except Exception as e:
-        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
+        st.error(f"ERRO DETALHADO AO SALVAR DIRETAMENTE: {e}")
+        st.exception(e)
         return False
 
 def carregar_fiscais():
@@ -69,55 +74,7 @@ def formatar_data_manual(data_timestamp):
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
 # --- Funções de Interface (Componentes das Abas) ---
-def aba_consultar_escala(df_colaboradores, df_escalas):
-    st.header("🔎 Buscar minha escala")
-    nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
-    if not nomes_disponiveis:
-        st.warning("Nenhum(a) colaborador(a) cadastrado(a).")
-        return
-
-    nome_digitado = st.text_input("Digite seu nome para buscar:", placeholder="Comece a digitar...")
-    if nome_digitado:
-        sugestoes = [n for n in nomes_disponiveis if nome_digitado.lower() in n.lower()]
-        if sugestoes:
-            nome_confirmado = st.selectbox("Confirme seu nome:", options=sugestoes)
-            if nome_confirmado:
-                hoje = pd.Timestamp.today().normalize()
-                data_fim = hoje + timedelta(days=30)
-                st.info(f"Mostrando sua escala para **{nome_confirmado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
-                
-                resultados = pd.DataFrame()
-                if not df_escalas.empty:
-                    df_escalas['nome'] = df_escalas['nome'].astype(str)
-                    resultados = df_escalas[(df_escalas["nome"].str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
-
-                if not resultados.empty:
-                    resultados_display = resultados.copy()
-                    resultados_display["data"] = resultados_display["data"].apply(formatar_data_manual)
-                    st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
-                else:
-                    st.success(f"**{nome_confirmado}**, você não possui escalas agendadas.")
-        elif len(nome_digitado) > 2:
-            st.warning("Nenhum nome correspondente encontrado.")
-
-def aba_visao_geral(df_escalas):
-    st.subheader("🗓️ Visão Geral da Escala")
-    data_inicio_visao = st.date_input("Ver escala a partir de:", datetime.date.today())
-    if data_inicio_visao:
-        data_fim_visao = data_inicio_visao + timedelta(days=6)
-        st.info(f"Mostrando escalas de {data_inicio_visao.strftime('%d/%m')} a {data_fim_visao.strftime('%d/%m')}")
-        
-        df_view = pd.DataFrame()
-        if not df_escalas.empty:
-            df_view = df_escalas[(df_escalas['data'] >= pd.to_datetime(data_inicio_visao)) & (df_escalas['data'] <= pd.to_datetime(data_fim_visao))].copy()
-
-        if df_view.empty:
-            st.info("Nenhuma escala encontrada para este período.")
-        else:
-            df_view['data'] = df_view['data'].apply(formatar_data_manual)
-            st.dataframe(df_view.sort_values(["data", "nome"]), use_container_width=True, hide_index=True)
-
-def aba_editar_escala(df_colaboradores, df_escalas_cache):
+def aba_editar_escala(df_colaboradores, df_escalas):
     st.subheader("✏️ Editar Escala por Dia")
     if df_colaboradores.empty:
         st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores'.")
@@ -134,8 +91,8 @@ def aba_editar_escala(df_colaboradores, df_escalas_cache):
         st.markdown("---")
         
         horario_atual = ""
-        if not df_escalas_cache.empty:
-            escala_existente = df_escalas_cache[(df_escalas_cache['nome'] == colaborador_selecionado) & (df_escalas_cache['data'].dt.date == data_selecionada)]
+        if not df_escalas.empty:
+            escala_existente = df_escalas[(df_escalas['nome'] == colaborador_selecionado) & (df_escalas['data'].dt.date == data_selecionada)]
             if not escala_existente.empty:
                 horario_atual = escala_existente['horario'].iloc[0]
         
@@ -145,21 +102,16 @@ def aba_editar_escala(df_colaboradores, df_escalas_cache):
 
         if st.button("Salvar Dia", type="primary", use_container_width=True):
             with st.spinner("Salvando..."):
-                # --- LÓGICA DE SALVAMENTO SEGURA ---
-                # 1. Recarrega os dados mais recentes do Google Sheets, ignorando o cache
                 df_escalas_fresco = carregar_dados("escalas", ["nome", "data", "horario"], str(time.time()))
                 
-                # 2. Remove o registro antigo, se existir
                 df_escalas_sem_o_dia = df_escalas_fresco[~((df_escalas_fresco['nome'] == colaborador_selecionado) & (df_escalas_fresco['data'].dt.date == data_selecionada))]
                 
-                # 3. Adiciona o novo registro, se não for vazio
                 df_escalas_atualizado = df_escalas_sem_o_dia
                 if novo_horario not in ["", None]:
                     novo_registro = pd.DataFrame([{"nome": colaborador_selecionado, "data": pd.to_datetime(data_selecionada), "horario": novo_horario}])
                     df_escalas_atualizado = pd.concat([df_escalas_sem_o_dia, novo_registro], ignore_index=True)
 
-                # 4. Salva a planilha inteira de volta
-                if salvar_dados("escalas", df_escalas_atualizado):
+                if salvar_dados_direto("escalas", df_escalas_atualizado):
                     invalidate_cache()
                     st.success("Escala salva com sucesso!")
                     time.sleep(1)
@@ -167,6 +119,36 @@ def aba_editar_escala(df_colaboradores, df_escalas_cache):
 
 def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
     st.subheader("👥 Gerenciar Colaboradores")
+    
+    # --- FERRAMENTA DE DIAGNÓSTICO DE PERMISSÃO ---
+    st.markdown("---")
+    with st.expander("🔬 Clique aqui para verificar as permissões da Planilha"):
+        if st.button("Verificar Permissão de Escrita"):
+            try:
+                client_email = st.secrets["connections"]["gsheets"]["client_email"]
+                spreadsheet = conn.instance.open(st.secrets["connections"]["gsheets"]["spreadsheet"])
+                permissions = spreadsheet.list_permissions()
+                
+                permissao_encontrada = False
+                for p in permissions:
+                    if p.get('emailAddress') == client_email:
+                        st.info(f"Email do Robô: {p.get('emailAddress')}")
+                        st.info(f"Permissão Encontrada: **{p.get('role').upper()}**")
+                        permissao_encontrada = True
+                        if p.get('role') == 'writer':
+                            st.success("✅ A permissão 'writer' (Editor) está CORRETA!")
+                        else:
+                            st.error(f"❌ A permissão está como '{p.get('role')}', mas deveria ser 'writer' (Editor).")
+                
+                if not permissao_encontrada:
+                    st.error("ERRO: O email do robô não foi encontrado na lista de compartilhamento da planilha.")
+
+            except Exception as e:
+                st.error("Ocorreu um erro ao verificar as permissões.")
+                st.exception(e)
+    st.markdown("---")
+
+
     col1, col2 = st.columns([0.6, 0.4])
     with col1:
         st.write("**Colaboradores Atuais:**")
@@ -178,7 +160,7 @@ def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
             if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
                 novo_df = pd.DataFrame([{"nome": novo_nome}])
                 df_atualizado = pd.concat([df_colaboradores, novo_df], ignore_index=True)
-                if salvar_dados("colaboradores", df_atualizado):
+                if salvar_dados_direto("colaboradores", df_atualizado):
                     invalidate_cache()
                     st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
                     st.rerun()
@@ -191,11 +173,10 @@ def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
                 if nomes_para_remover:
                     df_colaboradores_final = df_colaboradores[~df_colaboradores['nome'].isin(nomes_para_remover)]
                     df_escalas_final = df_escalas[~df_escalas['nome'].isin(nomes_para_remover)]
-                    if salvar_dados("colaboradores", df_colaboradores_final) and salvar_dados("escalas", df_escalas_final):
+                    if salvar_dados_direto("colaboradores", df_colaboradores_final) and salvar_dados_direto("escalas", df_escalas_final):
                         invalidate_cache()
                         st.success("Colaboradores removidos com sucesso!")
                         st.rerun()
-
 # --- Estrutura Principal da Aplicação ---
 def main():
     st.title("📅 Visualizador de Escala")
@@ -207,6 +188,7 @@ def main():
 
     st.sidebar.title("Modo de Acesso")
     if not st.session_state.logado:
+        # TELA DE LOGIN
         with st.sidebar.form("login_form"):
             st.header("🔐 Acesso Fiscal")
             codigo = st.text_input("Código do fiscal")
@@ -222,6 +204,7 @@ def main():
                 else: st.sidebar.error("Código ou senha incorretos.")
         
         st.sidebar.markdown("---")
+        # ABA CONSULTAR ESCALA PARA NÃO LOGADOS
         aba_consultar_escala(df_colaboradores, df_escalas)
     
     else:
