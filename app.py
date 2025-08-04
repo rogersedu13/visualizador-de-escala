@@ -41,9 +41,7 @@ def invalidate_cache():
 
 # --- Funções de Dados (usando Google Sheets) ---
 @st.cache_data(ttl=600)
-def carregar_dados(worksheet_name, columns, cache_key):
-    # A chave 'cache_key' não é usada na função, mas sua presença força o Streamlit
-    # a re-executar a função quando o valor da chave muda.
+def carregar_dados(worksheet_name, columns, _cache_key):
     try:
         df = conn.read(worksheet=worksheet_name, usecols=list(range(len(columns))))
         df = df.dropna(how="all")
@@ -51,12 +49,10 @@ def carregar_dados(worksheet_name, columns, cache_key):
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
         return df
     except Exception as e:
-        # Se a planilha estiver vazia, gsheets pode dar erro. Retornamos um DF vazio.
         return pd.DataFrame(columns=columns)
 
 def salvar_dados(worksheet_name, df_atualizado):
     try:
-        # Garante que a coluna 'data' esteja no formato de string correto para o Sheets
         if 'data' in df_atualizado.columns:
             df_atualizado['data'] = pd.to_datetime(df_atualizado['data']).dt.strftime('%Y-%m-%d %H:%M:%S')
         conn.update(worksheet=worksheet_name, data=df_atualizado)
@@ -92,7 +88,8 @@ def aba_consultar_escala(df_colaboradores, df_escalas):
                 
                 resultados = pd.DataFrame()
                 if not df_escalas.empty:
-                    resultados = df_escalas[(df_escalas["nome"].astype(str).str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
+                    df_escalas['nome'] = df_escalas['nome'].astype(str)
+                    resultados = df_escalas[(df_escalas["nome"].str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
 
                 if not resultados.empty:
                     resultados_display = resultados.copy()
@@ -100,7 +97,7 @@ def aba_consultar_escala(df_colaboradores, df_escalas):
                     st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
                 else:
                     st.success(f"**{nome_confirmado}**, você não possui escalas agendadas.")
-        else:
+        elif len(nome_digitado) > 2:
             st.warning("Nenhum nome correspondente encontrado.")
 
 def aba_visao_geral(df_escalas):
@@ -120,7 +117,7 @@ def aba_visao_geral(df_escalas):
             df_view['data'] = df_view['data'].apply(formatar_data_manual)
             st.dataframe(df_view.sort_values(["data", "nome"]), use_container_width=True, hide_index=True)
 
-def aba_editar_escala(df_colaboradores, df_escalas):
+def aba_editar_escala(df_colaboradores, df_escalas_cache):
     st.subheader("✏️ Editar Escala por Dia")
     if df_colaboradores.empty:
         st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores'.")
@@ -137,24 +134,31 @@ def aba_editar_escala(df_colaboradores, df_escalas):
         st.markdown("---")
         
         horario_atual = ""
-        if not df_escalas.empty:
-            escala_existente = df_escalas[(df_escalas['nome'] == colaborador_selecionado) & (df_escalas['data'].dt.date == data_selecionada)]
+        if not df_escalas_cache.empty:
+            escala_existente = df_escalas_cache[(df_escalas_cache['nome'] == colaborador_selecionado) & (df_escalas_cache['data'].dt.date == data_selecionada)]
             if not escala_existente.empty:
                 horario_atual = escala_existente['horario'].iloc[0]
         
-        index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
+        index_horario = HORARIOS_PADRAO.index(str(horario_atual)) if str(horario_atual) in HORARIOS_PADRAO else 0
 
         novo_horario = st.selectbox(f"**3. Defina o horário para {colaborador_selecionado} em {data_selecionada.strftime('%d/%m/%Y')}:**", options=HORARIOS_PADRAO, index=index_horario)
 
         if st.button("Salvar Dia", type="primary", use_container_width=True):
             with st.spinner("Salvando..."):
-                df_escalas_sem_o_dia = df_escalas[~((df_escalas['nome'] == colaborador_selecionado) & (df_escalas['data'].dt.date == data_selecionada))]
+                # --- LÓGICA DE SALVAMENTO SEGURA ---
+                # 1. Recarrega os dados mais recentes do Google Sheets, ignorando o cache
+                df_escalas_fresco = carregar_dados("escalas", ["nome", "data", "horario"], str(time.time()))
                 
+                # 2. Remove o registro antigo, se existir
+                df_escalas_sem_o_dia = df_escalas_fresco[~((df_escalas_fresco['nome'] == colaborador_selecionado) & (df_escalas_fresco['data'].dt.date == data_selecionada))]
+                
+                # 3. Adiciona o novo registro, se não for vazio
                 df_escalas_atualizado = df_escalas_sem_o_dia
                 if novo_horario not in ["", None]:
                     novo_registro = pd.DataFrame([{"nome": colaborador_selecionado, "data": pd.to_datetime(data_selecionada), "horario": novo_horario}])
                     df_escalas_atualizado = pd.concat([df_escalas_sem_o_dia, novo_registro], ignore_index=True)
 
+                # 4. Salva a planilha inteira de volta
                 if salvar_dados("escalas", df_escalas_atualizado):
                     invalidate_cache()
                     st.success("Escala salva com sucesso!")
@@ -208,7 +212,9 @@ def main():
             codigo = st.text_input("Código do fiscal")
             senha = st.text_input("Senha", type="password")
             if st.form_submit_button("Entrar", use_container_width=True):
-                fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))] if codigo.isdigit() else pd.DataFrame()
+                fiscal_auth = pd.DataFrame()
+                if codigo.isdigit():
+                    fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))]
                 if not fiscal_auth.empty:
                     st.session_state.logado = True
                     st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]
