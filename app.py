@@ -6,6 +6,9 @@ from streamlit_gsheets import GSheetsConnection
 import time
 import gspread_dataframe as gd
 import random
+from fpdf import FPDF
+import base64
+from io import BytesIO
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -36,7 +39,7 @@ if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.
 def invalidate_cache():
     st.session_state.cache_key = str(random.randint(1, 1000000))
 
-# --- Funções de Dados (usando Google Sheets) ---
+# --- Funções de Dados ---
 @st.cache_data(ttl=600)
 def carregar_dados(worksheet_name, columns, _cache_key):
     try:
@@ -48,18 +51,16 @@ def carregar_dados(worksheet_name, columns, _cache_key):
     except Exception as e:
         return pd.DataFrame(columns=columns)
 
-# --- NOVA FUNÇÃO DE SALVAMENTO DE ACESSO DIRETO ---
 def salvar_dados_direto(worksheet_name, df_atualizado):
     try:
         spreadsheet = conn.instance.open(st.secrets["connections"]["gsheets"]["spreadsheet"])
         worksheet = spreadsheet.worksheet(worksheet_name)
         
-        # Converte a coluna de data para string no formato correto
         if 'data' in df_atualizado.columns:
             df_atualizado['data'] = pd.to_datetime(df_atualizado['data']).dt.strftime('%Y-%m-%d')
-
+        
         worksheet.clear()
-        gd.set_with_dataframe(worksheet, df_atualizado, resize=True)
+        gd.set_with_dataframe(worksheet, df_atualizado, resize=True, include_index=False)
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR DIRETAMENTE: {e}")
@@ -74,7 +75,55 @@ def formatar_data_manual(data_timestamp):
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
 # --- Funções de Interface (Componentes das Abas) ---
-def aba_editar_escala(df_colaboradores, df_escalas):
+def aba_consultar_escala(df_colaboradores, df_escalas):
+    st.header("🔎 Buscar minha escala")
+    nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
+    if not nomes_disponiveis:
+        st.warning("Nenhum(a) colaborador(a) cadastrado(a).")
+        return
+
+    nome_digitado = st.text_input("Digite seu nome para buscar:", placeholder="Comece a digitar...")
+    if nome_digitado:
+        sugestoes = [n for n in nomes_disponiveis if nome_digitado.lower() in n.lower()]
+        if sugestoes:
+            nome_confirmado = st.selectbox("Confirme seu nome:", options=sugestoes)
+            if nome_confirmado:
+                hoje = pd.Timestamp.today().normalize()
+                data_fim = hoje + timedelta(days=30)
+                st.info(f"Mostrando sua escala para **{nome_confirmado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
+                
+                resultados = pd.DataFrame()
+                if not df_escalas.empty:
+                    df_escalas['nome'] = df_escalas['nome'].astype(str)
+                    resultados = df_escalas[(df_escalas["nome"].str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
+
+                if not resultados.empty:
+                    resultados_display = resultados.copy()
+                    resultados_display["data"] = resultados_display["data"].apply(formatar_data_manual)
+                    st.dataframe(resultados_display[["data", "horario"]], use_container_width=True, hide_index=True)
+                else:
+                    st.success(f"**{nome_confirmado}**, você não possui escalas agendadas.")
+        elif len(nome_digitado) > 2:
+            st.warning("Nenhum nome correspondente encontrado.")
+
+def aba_visao_geral(df_escalas):
+    st.subheader("🗓️ Visão Geral da Escala")
+    data_inicio_visao = st.date_input("Ver escala a partir de:", datetime.date.today())
+    if data_inicio_visao:
+        data_fim_visao = data_inicio_visao + timedelta(days=6)
+        st.info(f"Mostrando escalas de {data_inicio_visao.strftime('%d/%m')} a {data_fim_visao.strftime('%d/%m')}")
+        
+        df_view = pd.DataFrame()
+        if not df_escalas.empty:
+            df_view = df_escalas[(df_escalas['data'] >= pd.to_datetime(data_inicio_visao)) & (df_escalas['data'] <= pd.to_datetime(data_fim_visao))].copy()
+
+        if df_view.empty:
+            st.info("Nenhuma escala encontrada para este período.")
+        else:
+            df_view['data'] = df_view['data'].apply(formatar_data_manual)
+            st.dataframe(df_view.sort_values(["data", "nome"]), use_container_width=True, hide_index=True)
+
+def aba_editar_escala(df_colaboradores, df_escalas_cache):
     st.subheader("✏️ Editar Escala por Dia")
     if df_colaboradores.empty:
         st.warning("Adicione colaboradores na aba 'Gerenciar Colaboradores'.")
@@ -91,8 +140,8 @@ def aba_editar_escala(df_colaboradores, df_escalas):
         st.markdown("---")
         
         horario_atual = ""
-        if not df_escalas.empty:
-            escala_existente = df_escalas[(df_escalas['nome'] == colaborador_selecionado) & (df_escalas['data'].dt.date == data_selecionada)]
+        if not df_escalas_cache.empty:
+            escala_existente = df_escalas_cache[(df_escalas_cache['nome'] == colaborador_selecionado) & (df_escalas_cache['data'].dt.date == data_selecionada)]
             if not escala_existente.empty:
                 horario_atual = escala_existente['horario'].iloc[0]
         
@@ -120,8 +169,7 @@ def aba_editar_escala(df_colaboradores, df_escalas):
 def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
     st.subheader("👥 Gerenciar Colaboradores")
     
-    # --- FERRAMENTA DE DIAGNÓSTICO DE PERMISSÃO ---
-    st.markdown("---")
+    # --- Ferramenta de Diagnóstico de Permissão ---
     with st.expander("🔬 Clique aqui para verificar as permissões da Planilha"):
         if st.button("Verificar Permissão de Escrita"):
             try:
@@ -147,7 +195,6 @@ def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
                 st.error("Ocorreu um erro ao verificar as permissões.")
                 st.exception(e)
     st.markdown("---")
-
 
     col1, col2 = st.columns([0.6, 0.4])
     with col1:
@@ -177,6 +224,7 @@ def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
                         invalidate_cache()
                         st.success("Colaboradores removidos com sucesso!")
                         st.rerun()
+
 # --- Estrutura Principal da Aplicação ---
 def main():
     st.title("📅 Visualizador de Escala")
@@ -188,7 +236,6 @@ def main():
 
     st.sidebar.title("Modo de Acesso")
     if not st.session_state.logado:
-        # TELA DE LOGIN
         with st.sidebar.form("login_form"):
             st.header("🔐 Acesso Fiscal")
             codigo = st.text_input("Código do fiscal")
@@ -204,7 +251,6 @@ def main():
                 else: st.sidebar.error("Código ou senha incorretos.")
         
         st.sidebar.markdown("---")
-        # ABA CONSULTAR ESCALA PARA NÃO LOGADOS
         aba_consultar_escala(df_colaboradores, df_escalas)
     
     else:
