@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import datetime
 from datetime import timedelta
-from supabase import create_client, Client
-import random
+from streamlit_gsheets import GSheetsConnection
 import time
 from fpdf import FPDF
 import base64
 from io import BytesIO
+import random
 
 # --- Constantes ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -22,13 +22,12 @@ HORARIOS_PADRAO = [
 # --- Configuração da Página ---
 st.set_page_config(page_title="Visualizador de Escala", layout="wide", initial_sidebar_state="expanded")
 
-# --- Conexão com o Supabase ---
+# --- Conexão com o Google Sheets ---
 try:
-    url = st.secrets["supabase_url"]
-    key = st.secrets["supabase_key"]
-    supabase: Client = create_client(url, key)
+    conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error("Falha na conexão com o banco de dados. Verifique a configuração dos 'Secrets'.")
+    st.error("Falha na conexão com a Planilha Google. Verifique a configuração dos 'Secrets'.")
+    st.exception(e)
     st.stop()
 
 # --- Gerenciamento de Estado e Cache ---
@@ -37,52 +36,32 @@ if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.randint(1, 1000000))
 
 def invalidate_cache():
+    """Força a invalidação do cache gerando uma nova chave."""
     st.session_state.cache_key = str(random.randint(1, 1000000))
 
-# --- Funções de Dados (RPC) ---
+# --- Funções de Dados (usando Google Sheets) ---
 @st.cache_data(ttl=600)
-def carregar_colaboradores(cache_key):
+def carregar_dados(worksheet_name, columns, cache_key):
+    st.write(f"Carregando dados de '{worksheet_name}' com chave: {cache_key}") # Linha de depuração
     try:
-        response = supabase.rpc('get_colaboradores').execute()
-        return pd.DataFrame(response.data)
-    except Exception as e:
-        st.error(f"Erro ao carregar colaboradores: {e}")
-        return pd.DataFrame(columns=['nome'])
-
-@st.cache_data(ttl=600)
-def carregar_escalas(cache_key):
-    try:
-        response = supabase.rpc('get_escalas').execute()
-        df = pd.DataFrame(response.data)
-        if 'data' in df.columns:
+        df = conn.read(worksheet=worksheet_name, usecols=list(range(len(columns))))
+        df = df.dropna(how="all")
+        if not df.empty and 'data' in df.columns:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
         return df
     except Exception as e:
-        st.error(f"Erro ao carregar escalas: {e}")
-        return pd.DataFrame(columns=['nome', 'data', 'horario'])
+        # Se a planilha estiver vazia, gsheets pode dar erro. Retornamos um DF vazio.
+        return pd.DataFrame(columns=columns)
 
-def salvar_dia_individual(nome, data, horario):
+def salvar_dados(worksheet_name, df_atualizado):
     try:
-        supabase.rpc('save_escala_dia', {'p_nome': nome, 'p_data': data.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
+        # Garante que a coluna 'data' esteja no formato de string correto para o Sheets
+        if 'data' in df_atualizado.columns:
+            df_atualizado['data'] = pd.to_datetime(df_atualizado['data']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        conn.update(worksheet=worksheet_name, data=df_atualizado)
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
-        return False
-
-def adicionar_colaborador(nome):
-    try:
-        supabase.rpc('add_colaborador', {'p_nome': nome}).execute()
-        return True
-    except Exception as e:
-        st.error(f"Erro ao adicionar colaborador: {e}")
-        return False
-
-def remover_colaboradores(lista_nomes):
-    try:
-        supabase.rpc('delete_colaboradores', {'p_nomes': lista_nomes}).execute()
-        return True
-    except Exception as e:
-        st.error(f"Erro ao remover colaboradores: {e}")
         return False
 
 def carregar_fiscais():
@@ -92,7 +71,7 @@ def formatar_data_manual(data_timestamp):
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
-# --- Funções de Interface ---
+# --- Funções de Interface (Componentes das Abas) ---
 def aba_consultar_escala(df_colaboradores, df_escalas):
     st.header("🔎 Buscar minha escala")
     nomes_disponiveis = sorted(df_colaboradores["nome"].dropna().unique()) if not df_colaboradores.empty else []
@@ -112,7 +91,7 @@ def aba_consultar_escala(df_colaboradores, df_escalas):
                 
                 resultados = pd.DataFrame()
                 if not df_escalas.empty:
-                    resultados = df_escalas[(df_escalas["nome"].str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
+                    resultados = df_escalas[(df_escalas["nome"].astype(str).str.lower() == nome_confirmado.lower()) & (df_escalas["data"] >= hoje) & (df_escalas["data"] <= data_fim)].sort_values("data")
 
                 if not resultados.empty:
                     resultados_display = resultados.copy()
@@ -168,13 +147,22 @@ def aba_editar_escala(df_colaboradores, df_escalas):
 
         if st.button("Salvar Dia", type="primary", use_container_width=True):
             with st.spinner("Salvando..."):
-                if salvar_dia_individual(colaborador_selecionado, data_selecionada, novo_horario):
+                # Remove o registro antigo, se existir
+                df_escalas_sem_o_dia = df_escalas[~((df_escalas['nome'] == colaborador_selecionado) & (df_escalas['data'].dt.date == data_selecionada))]
+                
+                # Adiciona o novo registro, se não for vazio
+                df_escalas_atualizado = df_escalas_sem_o_dia
+                if novo_horario not in ["", None]:
+                    novo_registro = pd.DataFrame([{"nome": colaborador_selecionado, "data": pd.to_datetime(data_selecionada), "horario": novo_horario}])
+                    df_escalas_atualizado = pd.concat([df_escalas_sem_o_dia, novo_registro], ignore_index=True)
+
+                if salvar_dados("escalas", df_escalas_atualizado):
                     invalidate_cache()
                     st.success("Escala salva com sucesso!")
                     time.sleep(1)
                     st.rerun()
 
-def aba_gerenciar_colaboradores(df_colaboradores):
+def aba_gerenciar_colaboradores(df_colaboradores, df_escalas):
     st.subheader("👥 Gerenciar Colaboradores")
     col1, col2 = st.columns([0.6, 0.4])
     with col1:
@@ -185,7 +173,9 @@ def aba_gerenciar_colaboradores(df_colaboradores):
         novo_nome = st.text_input("Nome").strip()
         if st.button("Adicionar Colaborador(a)"):
             if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
-                if adicionar_colaborador(novo_nome):
+                novo_df = pd.DataFrame([{"nome": novo_nome}])
+                df_atualizado = pd.concat([df_colaboradores, novo_df], ignore_index=True)
+                if salvar_dados("colaboradores", df_atualizado):
                     invalidate_cache()
                     st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
                     st.rerun()
@@ -196,20 +186,23 @@ def aba_gerenciar_colaboradores(df_colaboradores):
             nomes_para_remover = st.multiselect("Selecione para remover", options=df_colaboradores["nome"].tolist())
             if st.button("Remover Selecionados", type="secondary"):
                 if nomes_para_remover:
-                    if remover_colaboradores(nomes_para_remover):
+                    # Remove das duas planilhas
+                    df_colaboradores_final = df_colaboradores[~df_colaboradores['nome'].isin(nomes_para_remover)]
+                    df_escalas_final = df_escalas[~df_escalas['nome'].isin(nomes_para_remover)]
+                    if salvar_dados("colaboradores", df_colaboradores_final) and salvar_dados("escalas", df_escalas_final):
                         invalidate_cache()
                         st.success("Colaboradores removidos com sucesso!")
                         st.rerun()
 
-# --- MAIN APP ---
+# --- Estrutura Principal da Aplicação ---
 def main():
     st.title("📅 Visualizador de Escala")
     st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.2</p>", unsafe_allow_html=True)
     
     # Carrega os dados usando a chave de cache da sessão
     df_fiscais = carregar_fiscais()
-    df_colaboradores = carregar_colaboradores(st.session_state.cache_key)
-    df_escalas = carregar_escalas(st.session_state.cache_key)
+    df_colaboradores = carregar_dados("colaboradores", ["nome"], st.session_state.cache_key)
+    df_escalas = carregar_dados("escalas", ["nome", "data", "horario"], st.session_state.cache_key)
 
     st.sidebar.title("Modo de Acesso")
     if not st.session_state.logado:
@@ -240,11 +233,12 @@ def main():
         
         if aba_selecionada == "Visão Geral da Escala": aba_visao_geral(df_escalas)
         elif aba_selecionada == "Editar Escala": aba_editar_escala(df_colaboradores, df_escalas)
-        elif aba_selecionada == "Gerenciar Colaboradores": aba_gerenciar_colaboradores(df_colaboradores)
+        elif aba_selecionada == "Gerenciar Colaboradores": aba_gerenciar_colaboradores(df_colaboradores, df_escalas)
         elif aba_selecionada == "Consultar Escala": aba_consultar_escala(df_colaboradores, df_escalas)
 
     st.markdown("---")
     st.markdown("""<p style='text-align: center; color: grey;'>Desenvolvido por @Rogério Souza</p>""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
+    st.set_option('client.showErrorDetails', True) # Mostra mais detalhes de erro durante o desenvolvimento
     main()
