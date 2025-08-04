@@ -57,29 +57,29 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO CIRÚRGICA E DEFINITIVA ---
-def salvar_escala_individual(registros_para_salvar):
-    """Salva a escala de forma segura, atualizando, inserindo ou apagando linha por linha."""
+def salvar_escala_final(registros_da_semana):
+    """Apaga todos os registros da semana para um colaborador e insere os novos."""
     try:
-        for registro in registros_para_salvar:
-            nome = registro['nome']
-            data = registro['data']
-            horario = registro['horario']
+        if not registros_da_semana:
+            return True
 
-            # Se o horário estiver vazio, apaga o registro daquele dia específico.
-            if horario in ["", None]:
-                supabase.table('escalas').delete().match({'nome': nome, 'data': data}).execute()
-            # Se houver um horário (incluindo "Folga"), insere um novo ou ATUALIZA o existente.
-            else:
-                supabase.table('escalas').upsert({
-                    'nome': nome,
-                    'data': data,
-                    'horario': horario
-                }, on_conflict='nome, data').execute()
+        nome_colaborador = registros_da_semana[0]['nome']
+        datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
+
+        supabase.table('escalas').delete().match({
+            'nome': nome_colaborador
+        }).in_('data', datas_da_semana_str).execute()
+        
+        registros_para_inserir = [
+            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
+        ]
+
+        if registros_para_inserir:
+            supabase.table('escalas').insert(registros_para_inserir).execute()
+            
         return True
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
-        st.exception(e) # Mostra o traceback completo do erro para depuração
         return False
 
 def adicionar_colaborador(nome):
@@ -133,6 +133,13 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if st.session_state.logado:
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Forçar Atualização de Dados", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache de dados limpo. Recarregando...")
+        time.sleep(1)
+        st.rerun()
+    
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
@@ -176,9 +183,7 @@ if aba_principal == "Consultar minha escala":
                 if st.button("📥 Baixar em PDF"):
                     pdf = PDF()
                     pdf.add_page()
-                    pdf.set_font("Arial", "B", 16)
-                    pdf.cell(0, 10, f"Escala de Trabalho: {nome_confirmado}", ln=True, align="C")
-                    # ... (código PDF)
+                    # (código PDF)
             else:
                 st.success(f"**{nome_confirmado}**, você não possui escalas agendadas para os próximos 30 dias.")
 
@@ -287,7 +292,7 @@ elif aba_principal == "Área do Fiscal":
                                 registros_para_salvar.append(registro)
                             
                             with st.spinner("Salvando..."):
-                                if salvar_escala_individual(registros_para_salvar):
+                                if salvar_escala_final(registros_para_salvar):
                                     st.cache_data.clear()
                                     st.success("Escala salva com sucesso!")
                                     time.sleep(1)
