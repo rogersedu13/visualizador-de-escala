@@ -57,16 +57,43 @@ def carregar_escalas():
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame(columns=['nome', 'data', 'horario'])
 
-# --- FUNÇÃO DE SALVAMENTO FINAL USANDO RPC ---
-def salvar_escala_final(nome_colaborador, data_inicio_semana, registros):
-    """Chama a função SQL no Supabase para fazer a atualização de forma atômica."""
+# --- FUNÇÃO DE SALVAMENTO FINAL COM VERIFICAÇÃO ---
+def salvar_escala_final(registros_da_semana):
+    """Apaga todos os registros da semana para um colaborador, insere os novos e verifica."""
     try:
-        supabase.rpc('atualizar_escala_semanal', {
-            'p_nome': nome_colaborador,
-            'p_data_inicio': data_inicio_semana.strftime('%Y-%m-%d'),
-            'p_registros': registros
-        }).execute()
-        return True
+        if not registros_da_semana:
+            return True
+
+        nome_colaborador = registros_da_semana[0]['nome']
+        datas_da_semana_str = [reg['data'] for reg in registros_da_semana]
+
+        # Passo 1: Deleção segura
+        supabase.table('escalas').delete().match({
+            'nome': nome_colaborador
+        }).in_('data', datas_da_semana_str).execute()
+        
+        # Passo 2: Prepara a lista de novos registros
+        registros_para_inserir = [
+            reg for reg in registros_da_semana if reg['horario'] not in ["", None]
+        ]
+
+        # Passo 3: Insere os novos registros
+        if registros_para_inserir:
+            supabase.table('escalas').insert(registros_para_inserir).execute()
+        
+        # Passo 4: VERIFICAÇÃO
+        time.sleep(0.5) # Pequena pausa para garantir que o banco de dados processe
+        response = supabase.table('escalas').select('data').match({
+            'nome': nome_colaborador
+        }).in_('data', datas_da_semana_str).execute()
+        
+        # Compara o número de registros que deveriam ter sido salvos com o que realmente foi
+        if len(pd.DataFrame(response.data)) == len(registros_para_inserir):
+            return True
+        else:
+            st.error("ERRO DE VERIFICAÇÃO: O banco de dados não confirmou o salvamento dos dados. Tente novamente.")
+            return False
+            
     except Exception as e:
         st.error(f"ERRO DETALHADO AO SALVAR: {e}")
         return False
@@ -245,14 +272,17 @@ elif aba_principal == "Área do Fiscal":
                     with st.form(key=f"form_{colaborador_selecionado}_{dia_inicio_semana.strftime('%Y%m%d')}"):
                         cols = st.columns(7)
                         for i, data_obj in enumerate(datas_da_semana_obj):
+                            dia_str = DIAS_SEMANA_PT[i]
+                            
                             horario_atual_df = escala_atual_colaborador[escala_atual_colaborador['data'].dt.date == data_obj]
                             horario_atual = horario_atual_df['horario'].iloc[0] if not horario_atual_df.empty else ""
+                            
                             index_horario = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
                             
                             with cols[i]:
                                 widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
                                 st.selectbox(
-                                    f"{DIAS_SEMANA_PT[i]} ({data_obj.strftime('%d/%m')})",
+                                    f"{dia_str} ({data_obj.strftime('%d/%m')})",
                                     options=HORARIOS_PADRAO,
                                     index=index_horario,
                                     key=widget_key 
@@ -266,12 +296,15 @@ elif aba_principal == "Área do Fiscal":
                                 widget_key = f"horario_{i}_{dia_inicio_semana.strftime('%Y%m%d')}"
                                 novo_horario = st.session_state[widget_key]
                                 
-                                # Apenas preparamos a lista, sem o 'nome'
-                                registro = {"data": data_obj.strftime('%Y-%m-%d'), "horario": novo_horario}
+                                registro = {
+                                    "nome": colaborador_selecionado,
+                                    "data": data_obj.strftime('%Y-%m-%d'),
+                                    "horario": novo_horario
+                                }
                                 registros_para_salvar.append(registro)
                             
                             with st.spinner("Salvando..."):
-                                if salvar_escala_final(colaborador_selecionado, dia_inicio_semana, registros_para_salvar):
+                                if salvar_escala_final(registros_para_salvar):
                                     st.cache_data.clear()
                                     st.success("Escala salva com sucesso!")
                                     time.sleep(1)
