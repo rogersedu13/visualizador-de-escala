@@ -5,8 +5,7 @@ import datetime
 from datetime import timedelta, date
 from supabase import create_client, Client
 import time
-from fpdf import FPDF # Usando a biblioteca original fpdf
-# unicodedata e BytesIO não são estritamente necessários nesta abordagem
+# As bibliotecas FPDF, BytesIO e unicodedata foram removidas por não serem mais necessárias
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -97,44 +96,6 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-# --- Geração de PDF (Adaptado para a biblioteca FPDF original) ---
-def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) -> bytes:
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.add_page()
-    pdf.set_font('Arial', 'B', 16)
-
-    # Função de sanitização para a biblioteca FPDF antiga
-    def sanitizar_texto(texto):
-        return texto.encode('latin-1', 'replace').decode('latin-1')
-
-    # Título
-    titulo_pdf = f"Escala de Trabalho - {nome_colaborador}"
-    pdf.cell(0, 10, sanitizar_texto(titulo_pdf), 0, 1, 'C')
-    pdf.ln(5)
-
-    # Subtítulo com data da emissão
-    pdf.set_font('Arial', '', 10)
-    data_emissao = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-    pdf.cell(0, 10, data_emissao, 0, 1, 'C')
-    pdf.ln(10)
-
-    # Cabeçalho da Tabela
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(230, 230, 230)
-    pdf.cell(95, 10, 'Data', 1, 0, 'C', fill=True)
-    pdf.cell(95, 10, 'Horario', 1, 1, 'C', fill=True)
-
-    # Corpo da Tabela
-    pdf.set_font('Arial', '', 11)
-    for _, row in df_escala.iterrows():
-        data_cell = sanitizar_texto(str(row['Data']))
-        horario_cell = sanitizar_texto(str(row['Horário']))
-        pdf.cell(95, 10, data_cell, 1, 0, 'C')
-        pdf.cell(95, 10, horario_cell, 1, 1, 'C')
-
-    # Retorna o PDF como bytes, codificando a saída final como a biblioteca antiga exige
-    return pdf.output(dest='S').encode('latin-1')
-
 # --- Abas da Interface ---
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
@@ -173,18 +134,22 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
                     st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
                     
                     st.markdown("---")
-                    pdf_bytes = gerar_pdf_escala_individual(resultados_display[["Data", "Horário"]], nome_selecionado)
+                    
+                    # --- LÓGICA DE DOWNLOAD CSV (ROBUSTA E SEGURA) ---
+                    # Converte o DataFrame para CSV em memória, codificado em UTF-8 para suportar acentos
+                    csv_bytes = resultados_display[["Data", "Horário"]].to_csv(index=False).encode('utf-8')
+
                     nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
+                    
                     st.download_button(
-                        label="🖨️ Baixar escala desta semana em PDF",
-                        data=pdf_bytes,
-                        file_name=f"escala_{nome_arquivo}_{semana_selecionada.strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf"
+                        label="✔️ Baixar escala em CSV (para Excel)",
+                        data=csv_bytes,
+                        file_name=f"escala_{nome_arquivo}_{semana_selecionada.strftime('%Y%m%d')}.csv",
+                        mime='text/csv',
                     )
                 else:
                     st.warning("Não foram encontrados dados de escala para você nesta semana.")
 
-# As outras funções de abas (gerenciar_semanas, editar_escala_semanal, etc.) permanecem as mesmas
 def aba_gerenciar_semanas(df_escalas_todas: pd.DataFrame):
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
     with st.container(border=True):
