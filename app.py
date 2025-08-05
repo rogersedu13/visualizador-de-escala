@@ -92,24 +92,35 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
+# --- Geração de HTML ---
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=1, justify="center")
+    # A única mudança está aqui: a adição da tag <meta charset="UTF-8">
     html_template = f"""
-    <html><head><title>Escala de {nome_colaborador}</title><style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
-        table {{ width: 80%; margin: 20px auto; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }}
-        th, td {{ padding: 12px 15px; text-align: center; border: 1px solid #ddd; }}
-        thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
-        p {{ text-align: center; color: #777; }}
-    </style></head><body>
-        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2><h2>{semana_str}</h2>
+    <html>
+    <head>
+        <title>Escala de {nome_colaborador}</title>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
+            table {{ width: 80%; margin: 20px auto; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }}
+            th, td {{ padding: 12px 15px; text-align: center; border: 1px solid #ddd; }}
+            thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            p {{ text-align: center; color: #777; }}
+        </style>
+    </head>
+    <body>
+        <h1>Escala de Trabalho</h1>
+        <h2>{nome_colaborador}</h2>
+        <h2>{semana_str}</h2>
         {tabela_html}
         <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
-    </body></html>"""
+    </body>
+    </html>
+    """
     return html_template
 
 # --- Abas da Interface ---
-# <<<<===== FUNÇÃO DE CONSULTA CORRIGIDA PARA USAR A MESMA LÓGICA DA EDIÇÃO =====>>>>
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome e a semana que deseja visualizar.")
@@ -123,7 +134,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
             st.info(f"**{nome_selecionado}**, ainda não há nenhuma semana de escala registrada no sistema.")
             return
         
-        # Usa o índice mestre de semanas, que é 100% confiável
         opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
         semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
 
@@ -133,7 +143,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
                 id_semana = semana_info['id']
                 df_escala_semana_atual = carregar_escala_semana_por_id(id_semana)
                 
-                # Filtra os dados da semana carregada para o colaborador específico
                 escala_final = df_escala_semana_atual[df_escala_semana_atual['nome'] == nome_selecionado].sort_values("data")
                 
                 if not escala_final.empty:
@@ -141,9 +150,9 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
                     st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
                     st.markdown("---"); st.subheader("📄 Opções de Impressão")
                     html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado, semana_selecionada_str)
-                    b64 = base64.b64encode(html_string.encode()).decode()
+                    b64 = base64.b64encode(html_string.encode('utf-8')).decode()
                     nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
-                    href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}_{semana_info["data_inicio"].strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
+                    href = f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_{nome_arquivo}_{semana_info["data_inicio"].strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
                     st.markdown(href, unsafe_allow_html=True); st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
                 else:
                     st.warning(f"**{nome_selecionado}**, você não possui horários definidos para esta semana específica.")
@@ -180,7 +189,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.Dat
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
         
         st.markdown("---")
-
         if colaborador and semana_info:
             id_semana = semana_info['id']
             data_inicio_semana = semana_info['data_inicio']
@@ -233,7 +241,6 @@ def main():
     st.title("📅 Escala Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
-    # A consulta pública agora usa o índice de semanas, que é mais confiável
     df_semanas = carregar_indice_semanas()
     
     with st.sidebar:
@@ -257,10 +264,10 @@ def main():
         with tab1: aba_gerenciar_semanas(df_semanas)
         with tab2: aba_editar_escala_semanal(df_colaboradores, df_semanas)
         with tab3: aba_gerenciar_colaboradores(df_colaboradores)
-        # Passa o índice de semanas para a consulta também
         with tab4: aba_consultar_escala_publica(df_colaboradores, df_semanas)
     else:
-        # A consulta pública agora precisa do índice de semanas
+        # Passamos também o df_semanas aqui, mesmo que possa estar vazio se não logado,
+        # a função de consulta agora lida com isso.
         aba_consultar_escala_publica(df_colaboradores, df_semanas)
 
 if __name__ == "__main__":
