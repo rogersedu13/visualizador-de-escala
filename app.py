@@ -20,7 +20,7 @@ HORARIOS_PADRAO = [
 
 # --- Configuração da Página do Streamlit ---
 st.set_page_config(
-    page_title="Escalas",
+    page_title="Escala",
     page_icon="📅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -117,12 +117,13 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
 
 def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) -> bytes:
     """Gera um PDF simples com a escala de um único colaborador."""
-    pdf = FPDF(orientation='P', unit='mm', format='A4') # P de Portrait (retrato)
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_font('Arial', 'B', 16)
 
     # Título
-    pdf.cell(0, 10, f"Escala de Trabalho - {nome_colaborador}", 0, 1, 'C')
+    titulo_pdf = f"Escala de Trabalho - {nome_colaborador}"
+    pdf.cell(0, 10, titulo_pdf.encode('latin-1', 'replace').decode('latin-1'), 0, 1, 'C')
     pdf.ln(5)
 
     # Subtítulo com data da emissão
@@ -140,11 +141,13 @@ def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) 
     # Corpo da Tabela
     pdf.set_font('Arial', '', 11)
     for _, row in df_escala.iterrows():
-        pdf.cell(95, 10, str(row['Data']), 1, 0, 'C')
-        pdf.cell(95, 10, str(row['Horário']), 1, 1, 'C')
+        data_cell = str(row['Data']).encode('latin-1', 'replace').decode('latin-1')
+        horario_cell = str(row['Horário']).encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(95, 10, data_cell, 1, 0, 'C')
+        pdf.cell(95, 10, horario_cell, 1, 1, 'C')
 
-    # Retorna o PDF como bytes
-    return pdf.output(dest='S').encode('latin-1')
+    # Retorna o PDF como bytes (versão corrigida para fpdf2)
+    return pdf.output()
 
 # --- Funções de Interface (Abas) ---
 
@@ -186,11 +189,10 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.
                     hide_index=True
                 )
                 
-                # --- BOTÃO DE DOWNLOAD ADICIONADO AQUI ---
+                # --- BOTÃO DE DOWNLOAD ---
                 st.markdown("---")
                 pdf_bytes = gerar_pdf_escala_individual(resultados_display[["Data", "Horário"]], nome_selecionado)
                 
-                # Limpa o nome para usar em nome de arquivo
                 nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip()
                 
                 st.download_button(
@@ -269,7 +271,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas: pd.Dat
                 horario_atual_dia = horarios_atuais.get(dia_da_semana, "")
                 index_horario = HORARIOS_PADRAO.index(horario_atual_dia) if horario_atual_dia in HORARIOS_PADRAO else 0
                 with cols[i]:
-                    # LINHA CORRIGIDA PARA EVITAR O BUG DE SALVAMENTO
                     horario_selecionado = st.selectbox(
                         dia_str,
                         options=HORARIOS_PADRAO,
@@ -317,7 +318,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escalas Frente de Caixa ")
+    st.title("📅 Escala")
 
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
