@@ -67,45 +67,41 @@ def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar escala da semana: {e}"); return pd.DataFrame()
 
+# <<<<===== FUNÇÃO CORRIGIDA PARA SER À PROVA DE FALHAS =====>>>>
 def get_semanas_iniciadas(df_escalas: pd.DataFrame) -> list[date]:
-    if df_escalas.empty: return []
+    # Verificação de segurança: se o dataframe estiver vazio ou não tiver a coluna 'data', retorna uma lista vazia para evitar erros.
+    if df_escalas.empty or 'data' not in df_escalas.columns:
+        return []
+    
+    # Remove qualquer linha onde a data seja inválida ou nula
     df_escalas = df_escalas.dropna(subset=['data'])
-    if df_escalas.empty: return []
+    if df_escalas.empty:
+        return []
+
+    # Agora, com segurança, processa as datas
     datas_unicas = df_escalas['data'].dt.date.unique()
     segundas = {d - timedelta(days=d.weekday()) for d in datas_unicas}
     return sorted(list(segundas), reverse=True)
 
-# <<<<===== LÓGICA DE INICIALIZAÇÃO MOVIDA DO SUPABASE PARA O PYTHON =====>>>>
 def inicializar_semana_no_banco(data_inicio: date, df_colaboradores: pd.DataFrame) -> bool:
-    """
-    Inicializa a semana executando a lógica de inserção no lado do Python,
-    chamando a função de salvar dia-a-dia que é 100% confiável.
-    """
     try:
         nomes_colaboradores = df_colaboradores['nome'].tolist()
         total_operacoes = len(nomes_colaboradores)
-        
-        # Mostra uma barra de progresso para o usuário
         progresso = st.progress(0, text=f"Inicializando semana para {total_operacoes} colaboradores...")
 
         for i, nome in enumerate(nomes_colaboradores):
             for j in range(7):
                 data_dia = data_inicio + timedelta(days=j)
-                # Usa a função 'save_escala_dia_final' que já sabemos que funciona.
-                # O ON CONFLICT dela garante que não haverá duplicatas.
                 supabase.rpc('save_escala_dia_final', {
                     'p_nome': nome.strip(), 
                     'p_data': data_dia.strftime('%Y-%m-%d'), 
-                    'p_horario': '' # Horário padrão vazio
+                    'p_horario': ''
                 }).execute()
             
-            # Atualiza a barra de progresso
             percentual_completo = int(((i + 1) / total_operacoes) * 100)
             progresso.progress(percentual_completo, text=f"Inicializando: {i+1}/{total_operacoes} concluídos...")
-
         progresso.empty()
         return True
-        
     except Exception as e:
         st.error(f"Erro ao inicializar semana no Python: {e}")
         return False
@@ -132,9 +128,8 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str = "") -> str:
+def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=1, justify="center")
-    titulo_semana = f"<h2>{semana_str}</h2>" if semana_str else ""
     html_template = f"""
     <html><head><title>Escala de {nome_colaborador}</title><style>
         body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
@@ -143,7 +138,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
         thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
         p {{ text-align: center; color: #777; }}
     </style></head><body>
-        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2>{titulo_semana}
+        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2>
         {tabela_html}
         <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
     </body></html>"""
@@ -163,7 +158,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
             hoje = pd.Timestamp.today().normalize(); data_fim = hoje + timedelta(days=30)
             st.info(f"Mostrando a escala de **{nome_selecionado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
             
-            # Comparação robusta para garantir a correspondência
             resultados = df_escalas_todas[
                 (df_escalas_todas['nome'].str.strip().str.lower() == nome_selecionado.strip().lower()) &
                 (df_escalas_todas['data'] >= hoje) &
@@ -191,10 +185,8 @@ def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.D
         data_selecionada = st.date_input("Selecione o dia de início da semana:", value=data_padrao)
         if st.button("🗓️ Inicializar Semana", type="primary", use_container_width=True):
             if df_colaboradores.empty:
-                st.error("Não há colaboradores cadastrados para inicializar a semana.")
-                return
+                st.error("Não há colaboradores cadastrados para inicializar a semana."); return
             data_inicio_semana = data_selecionada - timedelta(days=data_selecionada.weekday())
-            # A chamada da função agora passa o DataFrame de colaboradores
             if inicializar_semana_no_banco(data_inicio_semana, df_colaboradores):
                 st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
 
