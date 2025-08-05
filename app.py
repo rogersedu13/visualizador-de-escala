@@ -5,9 +5,8 @@ import datetime
 from datetime import timedelta, date
 from supabase import create_client, Client
 import time
-from fpdf import FPDF
-from io import BytesIO
-import unicodedata
+from fpdf import FPDF # Usando a biblioteca original fpdf
+# unicodedata e BytesIO não são estritamente necessários nesta abordagem
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -20,7 +19,7 @@ HORARIOS_PADRAO = [
 ]
 
 # --- Configuração da Página do Streamlit ---
-st.set_page_config(page_title="Escala Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Escalas Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
 
 # --- Conexão com o Banco de Dados Supabase ---
 try:
@@ -33,16 +32,11 @@ except Exception:
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 
-# --- Funções de Normalização e Formatação ---
-def remover_acentos(texto: str) -> str:
-    texto_normalizado = unicodedata.normalize('NFD', texto)
-    return texto_normalizado.encode('ascii', 'ignore').decode('utf-8')
-
+# --- Funções de Formatação e Acesso a Dados ---
 def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
-# --- Funções de Acesso a Dados (com Cache e Limpeza) ---
 @st.cache_data(ttl=300)
 def carregar_colaboradores() -> pd.DataFrame:
     try:
@@ -103,24 +97,45 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-# --- Geração de PDF ---
+# --- Geração de PDF (Adaptado para a biblioteca FPDF original) ---
 def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) -> bytes:
-    pdf = FPDF(orientation='P', unit='mm', format='A4'); pdf.add_page()
-    pdf.set_font('Arial', 'B', 16); titulo_pdf = f"Escala de Trabalho - {remover_acentos(nome_colaborador)}"
-    pdf.cell(0, 10, titulo_pdf, 0, 1, 'C'); pdf.ln(5)
-    pdf.set_font('Arial', '', 10); data_emissao = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-    pdf.cell(0, 10, data_emissao, 0, 1, 'C'); pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12); pdf.set_fill_color(230, 230, 230)
-    pdf.cell(95, 10, 'Data', 1, 0, 'C', fill=True); pdf.cell(95, 10, 'Horario', 1, 1, 'C', fill=True)
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 16)
+
+    # Função de sanitização para a biblioteca FPDF antiga
+    def sanitizar_texto(texto):
+        return texto.encode('latin-1', 'replace').decode('latin-1')
+
+    # Título
+    titulo_pdf = f"Escala de Trabalho - {nome_colaborador}"
+    pdf.cell(0, 10, sanitizar_texto(titulo_pdf), 0, 1, 'C')
+    pdf.ln(5)
+
+    # Subtítulo com data da emissão
+    pdf.set_font('Arial', '', 10)
+    data_emissao = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    pdf.cell(0, 10, data_emissao, 0, 1, 'C')
+    pdf.ln(10)
+
+    # Cabeçalho da Tabela
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(95, 10, 'Data', 1, 0, 'C', fill=True)
+    pdf.cell(95, 10, 'Horario', 1, 1, 'C', fill=True)
+
+    # Corpo da Tabela
     pdf.set_font('Arial', '', 11)
     for _, row in df_escala.iterrows():
-        data_cell = str(row['Data']); horario_cell = remover_acentos(str(row['Horário']))
-        pdf.cell(95, 10, data_cell, 1, 0, 'C'); pdf.cell(95, 10, horario_cell, 1, 1, 'C')
-    return pdf.output()
+        data_cell = sanitizar_texto(str(row['Data']))
+        horario_cell = sanitizar_texto(str(row['Horário']))
+        pdf.cell(95, 10, data_cell, 1, 0, 'C')
+        pdf.cell(95, 10, horario_cell, 1, 1, 'C')
+
+    # Retorna o PDF como bytes, codificando a saída final como a biblioteca antiga exige
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- Abas da Interface ---
-
-# <<<<===== FUNÇÃO TOTALMENTE REFEITA =====>>>>
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome e a semana que deseja visualizar.")
@@ -129,12 +144,10 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
         st.warning("Nenhum colaborador cadastrado no momento.")
         return
 
-    # Passo 1: Selecionar o nome
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis, index=0)
 
     if nome_selecionado:
-        # Passo 2: Encontrar e listar as semanas disponíveis para ESSA pessoa
         escalas_do_colaborador = df_escalas_todas[df_escalas_todas['nome'].str.strip() == nome_selecionado.strip()]
         semanas_do_colaborador = get_semanas_iniciadas(escalas_do_colaborador)
 
@@ -142,14 +155,12 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
             st.info(f"**{nome_selecionado}**, você ainda não tem nenhuma semana de escala registrada.")
             return
         
-        # Passo 3: Selecionar a semana
         opcoes_semana = {f"Semana de {d.strftime('%d/%m/%Y')}": d for d in semanas_do_colaborador}
         semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
 
         if semana_selecionada_str:
             semana_selecionada = opcoes_semana[semana_selecionada_str]
             
-            # Passo 4: Carregar os dados da semana e exibir
             with st.container(border=True):
                 df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
                 escala_final = df_escala_semana_atual[df_escala_semana_atual['nome'].str.strip() == nome_selecionado.strip()].sort_values("data")
@@ -163,16 +174,17 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
                     
                     st.markdown("---")
                     pdf_bytes = gerar_pdf_escala_individual(resultados_display[["Data", "Horário"]], nome_selecionado)
-                    nome_arquivo = remover_acentos("".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip())
+                    nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
                     st.download_button(
                         label="🖨️ Baixar escala desta semana em PDF",
                         data=pdf_bytes,
-                        file_name=f"escala_{nome_arquivo.replace(' ', '_').lower()}_{semana_selecionada.strftime('%Y%m%d')}.pdf",
+                        file_name=f"escala_{nome_arquivo}_{semana_selecionada.strftime('%Y%m%d')}.pdf",
                         mime="application/pdf"
                     )
                 else:
                     st.warning("Não foram encontrados dados de escala para você nesta semana.")
 
+# As outras funções de abas (gerenciar_semanas, editar_escala_semanal, etc.) permanecem as mesmas
 def aba_gerenciar_semanas(df_escalas_todas: pd.DataFrame):
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
     with st.container(border=True):
@@ -223,7 +235,8 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
                 horario_atual_dia = horarios_atuais.get(dia_da_semana, "")
                 index_horario = HORARIOS_PADRAO.index(horario_atual_dia) if horario_atual_dia in HORARIOS_PADRAO else 0
                 with cols[i]:
-                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{remover_acentos(colaborador).lower()}_{semana_selecionada.strftime('%Y%m%d')}_{i}")
+                    key_colaborador = colaborador.strip().replace(' ', '_')
+                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{semana_selecionada.strftime('%Y%m%d')}_{i}")
                     horarios_novos.append(horario_selecionado)
             
             if st.button("💾 Salvar Escala da Semana", type="primary", use_container_width=True):
@@ -255,7 +268,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escala Frente de Caixa")
+    st.title("📅 Escalas Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
     df_escalas_todas = carregar_todas_escalas()
