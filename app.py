@@ -54,7 +54,6 @@ def carregar_todas_escalas() -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar todas as escalas: {e}"); return pd.DataFrame()
 
-# NOVA FUNÇÃO QUE CARREGA O ÍNDICE DE SEMANAS
 @st.cache_data(ttl=60)
 def carregar_indice_semanas() -> pd.DataFrame:
     try:
@@ -176,7 +175,11 @@ def aba_gerenciar_semanas(df_semanas: pd.DataFrame):
         st.subheader("📋 Semanas Já Inicializadas")
         if df_semanas.empty: st.info("Nenhuma semana foi inicializada ainda.")
         else:
-            st.dataframe(df_semanas[['nome_semana']], use_container_width=True, hide_index=True, rename_columns={'nome_semana': 'Semanas Disponíveis para Edição'})
+            # ===== AQUI ESTÁ A CORREÇÃO =====
+            # 1. Renomeamos a coluna ANTES de passar para o st.dataframe
+            df_display = df_semanas[['nome_semana']].rename(columns={'nome_semana': 'Semanas Disponíveis para Edição'})
+            # 2. Usamos a nova variável df_display no st.dataframe
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
     with st.container(border=True):
@@ -185,7 +188,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.Dat
 
         col1, col2 = st.columns(2)
         with col1:
-            # Cria um dicionário mapeando o nome da semana para o ID e data de início
             opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
             semana_selecionada_str = st.selectbox("1. Selecione a semana para editar:", options=opcoes_semana.keys())
             semana_info = opcoes_semana.get(semana_selecionada_str)
@@ -197,6 +199,7 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.Dat
 
         if colaborador and semana_info:
             id_semana = semana_info['id']
+            data_inicio_semana = semana_info['data_inicio']
             df_escala_semana_atual = carregar_escala_semana_por_id(id_semana)
             escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
             
@@ -205,13 +208,13 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.Dat
 
             cols = st.columns(7); horarios_novos = []
             for i in range(7):
-                dia_da_semana = semana_info['data_inicio'] + timedelta(days=i)
+                dia_da_semana = data_inicio_semana + timedelta(days=i)
                 dia_str = f"{DIAS_SEMANA_PT[i]} ({dia_da_semana.strftime('%d/%m')})"
                 horario_atual_dia = horarios_atuais.get(dia_da_semana, "")
                 index_horario = HORARIOS_PADRAO.index(horario_atual_dia) if horario_atual_dia in HORARIOS_PADRAO else 0
                 with cols[i]:
                     key_colaborador = colaborador.replace(' ', '_')
-                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{semana_info['data_inicio'].strftime('%Y%m%d')}_{i}")
+                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{data_inicio_semana.strftime('%Y%m%d')}_{i}")
                     horarios_novos.append(horario_selecionado)
             
             if st.button("💾 Salvar Escala da Semana", type="primary", use_container_width=True):
