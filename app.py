@@ -40,8 +40,7 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
 def carregar_colaboradores() -> pd.DataFrame:
     try:
         df = pd.DataFrame(supabase.rpc('get_colaboradores').execute().data)
-        if not df.empty:
-            df['nome'] = df['nome'].str.strip()
+        if not df.empty: df['nome'] = df['nome'].str.strip()
         return df
     except Exception as e: st.error(f"Erro ao carregar colaboradores: {e}"); return pd.DataFrame()
 
@@ -55,59 +54,43 @@ def carregar_todas_escalas() -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar todas as escalas: {e}"); return pd.DataFrame()
 
-@st.cache_data(ttl=10)
-def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
+# NOVA FUNÇÃO QUE CARREGA O ÍNDICE DE SEMANAS
+@st.cache_data(ttl=60)
+def carregar_indice_semanas() -> pd.DataFrame:
     try:
-        params = {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}
+        response = supabase.table('semanas').select('id, nome_semana, data_inicio').order('data_inicio', desc=True).execute()
+        return pd.DataFrame(response.data)
+    except Exception as e: st.error(f"Erro ao carregar índice de semanas: {e}"); return pd.DataFrame()
+
+@st.cache_data(ttl=10)
+def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
+    try:
+        params = {'p_semana_id': id_semana}
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
             df['nome'] = df['nome'].str.strip()
         return df
-    except Exception as e: st.error(f"Erro ao carregar escala da semana: {e}"); return pd.DataFrame()
-
-# <<<<===== FUNÇÃO CORRIGIDA PARA SER À PROVA DE FALHAS =====>>>>
-def get_semanas_iniciadas(df_escalas: pd.DataFrame) -> list[date]:
-    # Verificação de segurança: se o dataframe estiver vazio ou não tiver a coluna 'data', retorna uma lista vazia para evitar erros.
-    if df_escalas.empty or 'data' not in df_escalas.columns:
-        return []
+    except Exception as e: st.error(f"Erro ao carregar escala da semana por ID: {e}"); return pd.DataFrame()
     
-    # Remove qualquer linha onde a data seja inválida ou nula
+def get_semanas_iniciadas(df_escalas: pd.DataFrame) -> list[date]:
+    if df_escalas.empty or 'data' not in df_escalas.columns: return []
     df_escalas = df_escalas.dropna(subset=['data'])
-    if df_escalas.empty:
-        return []
-
-    # Agora, com segurança, processa as datas
+    if df_escalas.empty: return []
     datas_unicas = df_escalas['data'].dt.date.unique()
     segundas = {d - timedelta(days=d.weekday()) for d in datas_unicas}
     return sorted(list(segundas), reverse=True)
 
-def inicializar_semana_no_banco(data_inicio: date, df_colaboradores: pd.DataFrame) -> bool:
+def inicializar_semana_no_banco(data_inicio: date) -> bool:
     try:
-        nomes_colaboradores = df_colaboradores['nome'].tolist()
-        total_operacoes = len(nomes_colaboradores)
-        progresso = st.progress(0, text=f"Inicializando semana para {total_operacoes} colaboradores...")
-
-        for i, nome in enumerate(nomes_colaboradores):
-            for j in range(7):
-                data_dia = data_inicio + timedelta(days=j)
-                supabase.rpc('save_escala_dia_final', {
-                    'p_nome': nome.strip(), 
-                    'p_data': data_dia.strftime('%Y-%m-%d'), 
-                    'p_horario': ''
-                }).execute()
-            
-            percentual_completo = int(((i + 1) / total_operacoes) * 100)
-            progresso.progress(percentual_completo, text=f"Inicializando: {i+1}/{total_operacoes} concluídos...")
-        progresso.empty()
+        supabase.rpc('inicializar_escala_semanal', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
         return True
-    except Exception as e:
-        st.error(f"Erro ao inicializar semana no Python: {e}")
-        return False
+    except Exception as e: st.error(f"Erro ao inicializar semana: {e}"); return False
 
-def salvar_escala_semanal(nome: str, data_inicio: date, horarios: list) -> bool:
+def salvar_escala_semanal(nome: str, horarios: list, semana_info: dict) -> bool:
     try:
+        data_inicio = semana_info['data_inicio']
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
             supabase.rpc('save_escala_dia_final', {'p_nome': nome.strip(), 'p_data': data_dia.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
@@ -128,7 +111,7 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str) -> str:
+def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=1, justify="center")
     html_template = f"""
     <html><head><title>Escala de {nome_colaborador}</title><style>
@@ -138,7 +121,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str) -> str:
         thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
         p {{ text-align: center; color: #777; }}
     </style></head><body>
-        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2>
+        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2><h2>{semana_str}</h2>
         {tabela_html}
         <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
     </body></html>"""
@@ -147,92 +130,93 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str) -> str:
 # --- Abas da Interface ---
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
-    st.markdown("Selecione seu nome para visualizar sua escala para os próximos 30 dias.")
+    st.markdown("Selecione seu nome e a semana que deseja visualizar.")
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
-    nome_selecionado = st.selectbox("Selecione seu nome:", options=nomes_disponiveis, index=0)
+    nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis, index=0)
 
     if nome_selecionado:
-        with st.container(border=True):
-            hoje = pd.Timestamp.today().normalize(); data_fim = hoje + timedelta(days=30)
-            st.info(f"Mostrando a escala de **{nome_selecionado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
-            
-            resultados = df_escalas_todas[
-                (df_escalas_todas['nome'].str.strip().str.lower() == nome_selecionado.strip().lower()) &
-                (df_escalas_todas['data'] >= hoje) &
-                (df_escalas_todas['data'] <= data_fim)
-            ].sort_values("data")
+        escalas_do_colaborador = df_escalas_todas[df_escalas_todas['nome'] == nome_selecionado]
+        semanas_do_colaborador = get_semanas_iniciadas(escalas_do_colaborador)
 
-            if not resultados.empty:
-                resultados_display = resultados.copy(); resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa); resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
-                st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
-                
-                st.markdown("---"); st.subheader("📄 Opções de Impressão")
-                html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado)
-                b64 = base64.b64encode(html_string.encode()).decode()
-                nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
-                href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
-                st.markdown(href, unsafe_allow_html=True); st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
-            else:
-                st.success(f"✅ **{nome_selecionado}**, você não possui escalas agendadas para este período.")
+        if not semanas_do_colaborador:
+            st.info(f"**{nome_selecionado}**, você ainda não tem nenhuma semana de escala registrada."); return
+        
+        opcoes_semana = {f"Semana de {d.strftime('%d/%m/%Y')}": d for d in semanas_do_colaborador}
+        semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
 
-def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
-    semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
+        if semana_selecionada_str:
+            semana_selecionada = opcoes_semana[semana_selecionada_str]
+            with st.container(border=True):
+                escala_final = escalas_do_colaborador[(escalas_do_colaborador['data'].dt.date >= semana_selecionada) & (escalas_do_colaborador['data'].dt.date < semana_selecionada + timedelta(days=7))].sort_values("data")
+                if not escala_final.empty:
+                    resultados_display = escala_final.copy(); resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa); resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
+                    st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
+                    st.markdown("---"); st.subheader("📄 Opções de Impressão")
+                    html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado, semana_selecionada_str)
+                    b64 = base64.b64encode(html_string.encode()).decode()
+                    nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
+                    href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}_{semana_selecionada.strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
+                    st.markdown(href, unsafe_allow_html=True); st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
+                else:
+                    st.warning("Não foram encontrados dados de escala para você nesta semana.")
+
+def aba_gerenciar_semanas(df_semanas: pd.DataFrame):
     with st.container(border=True):
         st.subheader("➕ Inicializar Nova Semana de Escala")
         hoje = date.today(); data_padrao = hoje - timedelta(days=hoje.weekday())
         data_selecionada = st.date_input("Selecione o dia de início da semana:", value=data_padrao)
         if st.button("🗓️ Inicializar Semana", type="primary", use_container_width=True):
-            if df_colaboradores.empty:
-                st.error("Não há colaboradores cadastrados para inicializar a semana."); return
             data_inicio_semana = data_selecionada - timedelta(days=data_selecionada.weekday())
-            if inicializar_semana_no_banco(data_inicio_semana, df_colaboradores):
-                st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
-
+            with st.spinner(f"Inicializando semana de {data_inicio_semana.strftime('%d/%m')}..."):
+                if inicializar_semana_no_banco(data_inicio_semana):
+                    st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
     with st.container(border=True):
         st.subheader("📋 Semanas Já Inicializadas")
-        if not semanas_iniciadas: st.info("Nenhuma semana foi inicializada ainda.")
+        if df_semanas.empty: st.info("Nenhuma semana foi inicializada ainda.")
         else:
-            datas_formatadas = [f"Semana de {d.strftime('%d/%m/%Y')} a {(d + timedelta(days=6)).strftime('%d/%m/%Y')}" for d in semanas_iniciadas]
-            st.dataframe({"Semanas Disponíveis para Edição": datas_formatadas}, use_container_width=True, hide_index=True)
+            st.dataframe(df_semanas[['nome_semana']], use_container_width=True, hide_index=True, rename_columns={'nome_semana': 'Semanas Disponíveis para Edição'})
 
-def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
-    semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
+def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
     with st.container(border=True):
         st.subheader("✏️ Editar Escala Semanal")
-        if not semanas_iniciadas or df_colaboradores.empty: st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
+        if df_semanas.empty or df_colaboradores.empty: st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
 
         col1, col2 = st.columns(2)
         with col1:
-            opcoes_semana = {f"Semana de {d.strftime('%d/%m/%Y')}": d for d in semanas_iniciadas}
+            # Cria um dicionário mapeando o nome da semana para o ID e data de início
+            opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
             semana_selecionada_str = st.selectbox("1. Selecione a semana para editar:", options=opcoes_semana.keys())
-            semana_selecionada = opcoes_semana.get(semana_selecionada_str)
+            semana_info = opcoes_semana.get(semana_selecionada_str)
         with col2:
             nomes_lista = sorted(df_colaboradores["nome"].tolist())
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
+        
         st.markdown("---")
-        if colaborador and semana_selecionada:
-            df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
-            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'].str.strip().str.lower() == colaborador.strip().lower()]
+
+        if colaborador and semana_info:
+            id_semana = semana_info['id']
+            df_escala_semana_atual = carregar_escala_semana_por_id(id_semana)
+            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
             
-            st.markdown(f"**Editando horários para:** `{colaborador}` | **Semana de:** `{semana_selecionada.strftime('%d/%m/%Y')}`")
-            horarios_atuais = {row['data'].date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
+            st.markdown(f"**Editando horários para:** `{colaborador}` | `{semana_selecionada_str}`")
+            horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
 
             cols = st.columns(7); horarios_novos = []
             for i in range(7):
-                dia_da_semana = semana_selecionada + timedelta(days=i)
+                dia_da_semana = semana_info['data_inicio'] + timedelta(days=i)
                 dia_str = f"{DIAS_SEMANA_PT[i]} ({dia_da_semana.strftime('%d/%m')})"
                 horario_atual_dia = horarios_atuais.get(dia_da_semana, "")
                 index_horario = HORARIOS_PADRAO.index(horario_atual_dia) if horario_atual_dia in HORARIOS_PADRAO else 0
                 with cols[i]:
-                    key_colaborador = colaborador.strip().replace(' ', '_')
-                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{semana_selecionada.strftime('%Y%m%d')}_{i}")
+                    key_colaborador = colaborador.replace(' ', '_')
+                    horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{semana_info['data_inicio'].strftime('%Y%m%d')}_{i}")
                     horarios_novos.append(horario_selecionado)
             
             if st.button("💾 Salvar Escala da Semana", type="primary", use_container_width=True):
                 with st.spinner("Salvando alterações..."):
-                    if salvar_escala_semanal(colaborador, semana_selecionada, horarios_novos):
+                    if salvar_escala_semanal(colaborador, horarios_novos, semana_info):
                         st.cache_data.clear(); st.success("Escala da semana salva com sucesso!"); time.sleep(1); st.rerun()
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
@@ -263,6 +247,7 @@ def main():
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
     df_escalas_todas = carregar_todas_escalas()
+    df_semanas = carregar_indice_semanas()
     
     with st.sidebar:
         st.header("Modo de Acesso")
@@ -282,8 +267,8 @@ def main():
     if st.session_state.logado:
         tabs = ["Gerenciar Semanas 🗓️", "Editar Escala Semanal ✏️", "Gerenciar Colaboradores 👥", "Consultar Individualmente 🔎"]
         tab1, tab2, tab3, tab4 = st.tabs(tabs)
-        with tab1: aba_gerenciar_semanas(df_colaboradores, df_escalas_todas)
-        with tab2: aba_editar_escala_semanal(df_colaboradores, df_escalas_todas)
+        with tab1: aba_gerenciar_semanas(df_semanas)
+        with tab2: aba_editar_escala_semanal(df_colaboradores, df_semanas)
         with tab3: aba_gerenciar_colaboradores(df_colaboradores)
         with tab4: aba_consultar_escala_publica(df_colaboradores, df_escalas_todas)
     else:
