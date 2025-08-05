@@ -1,4 +1,4 @@
 streamlit
 pandas
 fpdf2
-st-gsheets-connection
+supabase
