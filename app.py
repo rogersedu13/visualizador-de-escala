@@ -103,7 +103,7 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
+def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=1, justify="center")
     html_template = f"""
     <html><head><title>Escala de {nome_colaborador}</title><style>
@@ -113,49 +113,56 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
         thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
         p {{ text-align: center; color: #777; }}
     </style></head><body>
-        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2><h2>{semana_str}</h2>
+        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2>
         {tabela_html}
         <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
     </body></html>"""
     return html_template
 
 # --- Abas da Interface ---
+
+# <<<<===== FUNÇÃO RESTAURADA PARA O MODELO ORIGINAL E MAIS SIMPLES =====>>>>
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
-    st.markdown("Selecione seu nome e a semana que deseja visualizar.")
-    if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
+    st.markdown("Selecione seu nome para visualizar sua escala para os próximos 30 dias.")
+
+    if df_colaboradores.empty:
+        st.warning("Nenhum colaborador cadastrado no momento.")
+        return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
-    nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis, index=0)
+    nome_selecionado = st.selectbox("Selecione seu nome:", options=nomes_disponiveis, index=0)
 
     if nome_selecionado:
-        # A comparação agora é 100% consistente pois os dados são limpos na carga
-        escalas_do_colaborador = df_escalas_todas[df_escalas_todas['nome'] == nome_selecionado]
-        semanas_do_colaborador = get_semanas_iniciadas(escalas_do_colaborador)
+        with st.container(border=True):
+            hoje = pd.Timestamp.today().normalize()
+            data_fim = hoje + timedelta(days=30)
+            st.info(f"Mostrando a escala de **{nome_selecionado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
+            
+            # A comparação agora é 100% consistente pois os dados são limpos na carga
+            resultados = df_escalas_todas[
+                (df_escalas_todas['nome'] == nome_selecionado) &
+                (df_escalas_todas['data'] >= hoje) &
+                (df_escalas_todas['data'] <= data_fim)
+            ].sort_values("data")
 
-        if not semanas_do_colaborador:
-            st.info(f"**{nome_selecionado}**, você ainda não tem nenhuma semana de escala registrada."); return
-        
-        opcoes_semana = {f"Semana de {d.strftime('%d/%m/%Y')}": d for d in semanas_do_colaborador}
-        semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
-
-        if semana_selecionada_str:
-            semana_selecionada = opcoes_semana[semana_selecionada_str]
-            with st.container(border=True):
-                df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
-                escala_final = df_escala_semana_atual[df_escala_semana_atual['nome'] == nome_selecionado].sort_values("data")
-                if not escala_final.empty:
-                    resultados_display = escala_final.copy(); resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa); resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
-                    st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
-                    st.markdown("---")
-                    st.subheader("📄 Opções de Impressão")
-                    html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado, semana_selecionada_str)
-                    b64 = base64.b64encode(html_string.encode()).decode()
-                    nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
-                    href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}_{semana_selecionada.strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
-                    st.markdown(href, unsafe_allow_html=True); st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
-                else:
-                    st.warning("Não foram encontrados dados de escala para você nesta semana.")
+            if not resultados.empty:
+                resultados_display = resultados.copy()
+                resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa)
+                resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
+                
+                st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.subheader("📄 Opções de Impressão")
+                html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado)
+                b64 = base64.b64encode(html_string.encode()).decode()
+                nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
+                href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
+                st.markdown(href, unsafe_allow_html=True)
+                st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
+            else:
+                st.success(f"✅ **{nome_selecionado}**, você não possui escalas agendadas para este período.")
 
 def aba_gerenciar_semanas(df_escalas_todas: pd.DataFrame):
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
@@ -236,7 +243,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escala Frente de Caixa")
+    st.title("📅 Escala da Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
     df_escalas_todas = carregar_todas_escalas()
