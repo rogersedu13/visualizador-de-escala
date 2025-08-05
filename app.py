@@ -5,7 +5,7 @@ import datetime
 from datetime import timedelta, date
 from supabase import create_client, Client
 import time
-# As bibliotecas FPDF, BytesIO e unicodedata foram removidas por não serem mais necessárias
+import base64
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -18,7 +18,7 @@ HORARIOS_PADRAO = [
 ]
 
 # --- Configuração da Página do Streamlit ---
-st.set_page_config(page_title="Escalas Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Escala Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
 
 # --- Conexão com o Banco de Dados Supabase ---
 try:
@@ -39,7 +39,11 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
 @st.cache_data(ttl=300)
 def carregar_colaboradores() -> pd.DataFrame:
     try:
-        return pd.DataFrame(supabase.rpc('get_colaboradores').execute().data)
+        df = pd.DataFrame(supabase.rpc('get_colaboradores').execute().data)
+        # Limpa os nomes na carga para consistência
+        if not df.empty:
+            df['nome'] = df['nome'].str.strip()
+        return df
     except Exception as e: st.error(f"Erro ao carregar colaboradores: {e}"); return pd.DataFrame()
 
 @st.cache_data(ttl=60)
@@ -48,6 +52,8 @@ def carregar_todas_escalas() -> pd.DataFrame:
         df = pd.DataFrame(supabase.rpc('get_escalas').execute().data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            # Limpa os nomes na carga para consistência
+            df['nome'] = df['nome'].str.strip()
         return df
     except Exception as e: st.error(f"Erro ao carregar todas as escalas: {e}"); return pd.DataFrame()
 
@@ -59,6 +65,8 @@ def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            # Limpa os nomes na carga para consistência
+            df['nome'] = df['nome'].str.strip()
         return df
     except Exception as e: st.error(f"Erro ao carregar escala da semana: {e}"); return pd.DataFrame()
 
@@ -96,20 +104,36 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
+# --- Geração de HTML ---
+def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
+    tabela_html = df_escala.to_html(index=False, border=1, justify="center")
+    html_template = f"""
+    <html><head><title>Escala de {nome_colaborador}</title><style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
+        table {{ width: 80%; margin: 20px auto; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }}
+        th, td {{ padding: 12px 15px; text-align: center; border: 1px solid #ddd; }}
+        thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
+        p {{ text-align: center; color: #777; }}
+    </style></head><body>
+        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2><h2>{semana_str}</h2>
+        {tabela_html}
+        <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+    </body></html>"""
+    return html_template
+
 # --- Abas da Interface ---
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome e a semana que deseja visualizar.")
 
-    if df_colaboradores.empty:
-        st.warning("Nenhum colaborador cadastrado no momento.")
-        return
+    if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis, index=0)
 
     if nome_selecionado:
-        escalas_do_colaborador = df_escalas_todas[df_escalas_todas['nome'].str.strip() == nome_selecionado.strip()]
+        # A comparação agora é 100% consistente pois os dados são limpos na carga
+        escalas_do_colaborador = df_escalas_todas[df_escalas_todas['nome'] == nome_selecionado]
         semanas_do_colaborador = get_semanas_iniciadas(escalas_do_colaborador)
 
         if not semanas_do_colaborador:
@@ -121,32 +145,21 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
 
         if semana_selecionada_str:
             semana_selecionada = opcoes_semana[semana_selecionada_str]
-            
             with st.container(border=True):
                 df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
-                escala_final = df_escala_semana_atual[df_escala_semana_atual['nome'].str.strip() == nome_selecionado.strip()].sort_values("data")
+                escala_final = df_escala_semana_atual[df_escala_semana_atual['nome'] == nome_selecionado].sort_values("data")
 
                 if not escala_final.empty:
-                    resultados_display = escala_final.copy()
-                    resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa)
-                    resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
-                    
+                    resultados_display = escala_final.copy(); resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa); resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
                     st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
-                    
                     st.markdown("---")
-                    
-                    # --- LÓGICA DE DOWNLOAD CSV (ROBUSTA E SEGURA) ---
-                    # Converte o DataFrame para CSV em memória, codificado em UTF-8 para suportar acentos
-                    csv_bytes = resultados_display[["Data", "Horário"]].to_csv(index=False).encode('utf-8')
-
+                    st.subheader("📄 Opções de Impressão")
+                    html_string = gerar_html_escala(resultados_display[["Data", "Horário"]], nome_selecionado, semana_selecionada_str)
+                    b64 = base64.b64encode(html_string.encode()).decode()
                     nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip().replace(' ', '_').lower()
-                    
-                    st.download_button(
-                        label="✔️ Baixar escala em CSV (para Excel)",
-                        data=csv_bytes,
-                        file_name=f"escala_{nome_arquivo}_{semana_selecionada.strftime('%Y%m%d')}.csv",
-                        mime='text/csv',
-                    )
+                    href = f'<a href="data:text/html;base64,{b64}" download="escala_{nome_arquivo}_{semana_selecionada.strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
                 else:
                     st.warning("Não foram encontrados dados de escala para você nesta semana.")
 
@@ -172,8 +185,7 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
     with st.container(border=True):
         st.subheader("✏️ Editar Escala Semanal")
-        if not semanas_iniciadas or df_colaboradores.empty:
-            st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
+        if not semanas_iniciadas or df_colaboradores.empty: st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
 
         col1, col2 = st.columns(2)
         with col1:
@@ -183,12 +195,10 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
         with col2:
             nomes_lista = sorted(df_colaboradores["nome"].tolist())
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
-        
         st.markdown("---")
-
         if colaborador and semana_selecionada:
             df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
-            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'].str.strip() == colaborador.strip()]
+            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
             
             st.markdown(f"**Editando horários para:** `{colaborador}` | **Semana de:** `{semana_selecionada.strftime('%d/%m/%Y')}`")
             horarios_atuais = {row['data'].date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
@@ -200,7 +210,7 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
                 horario_atual_dia = horarios_atuais.get(dia_da_semana, "")
                 index_horario = HORARIOS_PADRAO.index(horario_atual_dia) if horario_atual_dia in HORARIOS_PADRAO else 0
                 with cols[i]:
-                    key_colaborador = colaborador.strip().replace(' ', '_')
+                    key_colaborador = colaborador.replace(' ', '_')
                     horario_selecionado = st.selectbox(dia_str, options=HORARIOS_PADRAO, index=index_horario, key=f"horario_{key_colaborador}_{semana_selecionada.strftime('%Y%m%d')}_{i}")
                     horarios_novos.append(horario_selecionado)
             
@@ -233,7 +243,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escalas Frente de Caixa")
+    st.title("📅 Escala Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
     df_escalas_todas = carregar_todas_escalas()
