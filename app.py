@@ -3,7 +3,6 @@ import pandas as pd
 import datetime
 from datetime import timedelta
 from supabase import create_client, Client
-import random
 import time
 from fpdf import FPDF
 import base64
@@ -31,19 +30,14 @@ except Exception as e:
     st.error("Falha na conexão com o banco de dados. Verifique a configuração dos 'Secrets'.")
     st.stop()
 
-# --- Gerenciamento de Estado e Cache ---
+# --- Gerenciamento de Estado ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
-if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.randint(1, 1000000))
 
-def invalidate_cache():
-    st.session_state.cache_key = str(random.randint(1, 1000000))
-
-# --- Funções de Dados ---
+# --- Funções de Dados (com cache do Streamlit) ---
 @st.cache_data(ttl=600)
-def carregar_colaboradores(cache_key):
+def carregar_colaboradores():
     try:
-        # Usando a função SQL para maior segurança e consistência
         response = supabase.rpc('get_colaboradores').execute()
         return pd.DataFrame(response.data)
     except Exception as e:
@@ -51,9 +45,8 @@ def carregar_colaboradores(cache_key):
         return pd.DataFrame(columns=['nome'])
 
 @st.cache_data(ttl=600)
-def carregar_escalas(cache_key):
+def carregar_escalas():
     try:
-        # Usando a função SQL
         response = supabase.rpc('get_escalas').execute()
         df = pd.DataFrame(response.data)
         if 'data' in df.columns:
@@ -65,11 +58,10 @@ def carregar_escalas(cache_key):
 
 def salvar_dia_individual(nome, data, horario):
     try:
-        # Usando a função SQL segura
         supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': data.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
         return True
     except Exception as e:
-        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
+        st.error(f"ERRO DETALhado AO SALVAR: {e}")
         return False
 
 def adicionar_colaborador(nome):
@@ -173,7 +165,7 @@ def aba_editar_escala(df_colaboradores, df_escalas):
         if st.button("Salvar Dia", type="primary", use_container_width=True):
             with st.spinner("Salvando..."):
                 if salvar_dia_individual(colaborador_selecionado, data_selecionada, novo_horario):
-                    invalidate_cache()
+                    st.cache_data.clear() # FORÇA A LIMPEZA DO CACHE
                     st.success("Escala salva com sucesso!")
                     time.sleep(1)
                     st.rerun()
@@ -190,7 +182,7 @@ def aba_gerenciar_colaboradores(df_colaboradores):
         if st.button("Adicionar Colaborador(a)"):
             if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
                 if adicionar_colaborador(novo_nome):
-                    invalidate_cache()
+                    st.cache_data.clear() # FORÇA A LIMPEZA DO CACHE
                     st.success(f"'{novo_nome}' adicionado(a) com sucesso!")
                     st.rerun()
             else: st.error("Nome inválido ou já existente.")
@@ -201,7 +193,7 @@ def aba_gerenciar_colaboradores(df_colaboradores):
             if st.button("Remover Selecionados", type="secondary"):
                 if nomes_para_remover:
                     if remover_colaboradores(nomes_para_remover):
-                        invalidate_cache()
+                        st.cache_data.clear() # FORÇA A LIMPEZA DO CACHE
                         st.success("Colaboradores removidos com sucesso!")
                         st.rerun()
 
@@ -211,8 +203,9 @@ def main():
     st.markdown("<p style='text-align: center; font-size: 12px;'>Versão 1.2</p>", unsafe_allow_html=True)
     
     df_fiscais = carregar_fiscais()
-    df_colaboradores = carregar_colaboradores(st.session_state.cache_key)
-    df_escalas = carregar_escalas(st.session_state.cache_key)
+    # As funções de carregar não precisam mais da chave de cache
+    df_colaboradores = carregar_colaboradores()
+    df_escalas = carregar_escalas()
 
     st.sidebar.title("Modo de Acesso")
     if not st.session_state.logado:
@@ -235,13 +228,9 @@ def main():
     
     else:
         st.sidebar.success(f"Logado como: {st.session_state.nome_logado}")
-        if st.sidebar.button("🔄 Forçar Atualização", use_container_width=True, help="Clique se os dados parecerem desatualizados."):
-            invalidate_cache()
-            st.toast("Dados atualizados!")
-            st.rerun()
         if st.sidebar.button("Logout", use_container_width=True):
             st.session_state.logado = False
-            invalidate_cache()
+            st.cache_data.clear() # Limpa o cache ao deslogar
             st.rerun()
         
         opcoes_abas = ["Visão Geral da Escala", "Editar Escala", "Gerenciar Colaboradores", "Consultar Escala"]
