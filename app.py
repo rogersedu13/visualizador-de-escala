@@ -37,9 +37,10 @@ if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 if "cache_key" not in st.session_state: st.session_state.cache_key = str(random.randint(1, 1000000))
 
 def invalidate_cache():
+    """Força a invalidação do cache gerando uma nova chave."""
     st.session_state.cache_key = str(random.randint(1, 1000000))
 
-# --- Funções de Dados (RPC) ---
+# --- Funções de Dados (usando RPC para segurança) ---
 @st.cache_data(ttl=600)
 def carregar_colaboradores(cache_key):
     try:
@@ -63,10 +64,11 @@ def carregar_escalas(cache_key):
 
 def salvar_dia_individual(nome, data, horario):
     try:
+        # Chama a função SQL segura 'save_escala_dia_final'
         supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': data.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
         return True
     except Exception as e:
-        st.error(f"ERRO DETALHADO AO SALVAR: {e}")
+        st.error(f"ERRO DETALhado AO SALVAR: {e}")
         return False
 
 def adicionar_colaborador(nome):
@@ -232,6 +234,13 @@ def main():
     
     else:
         st.sidebar.success(f"Logado como: {st.session_state.nome_logado}")
+        
+        if st.sidebar.button("🔄 Forçar Atualização de Dados", use_container_width=True):
+            invalidate_cache()
+            st.toast("Dados atualizados da base!")
+            time.sleep(1)
+            st.rerun()
+            
         if st.sidebar.button("Logout", use_container_width=True):
             st.session_state.logado = False
             invalidate_cache()
