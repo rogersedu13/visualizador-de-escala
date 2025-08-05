@@ -7,7 +7,7 @@ from supabase import create_client, Client
 import time
 from fpdf import FPDF
 from io import BytesIO
-import unicodedata
+# unicodedata não é mais necessário com a nova abordagem
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -20,7 +20,7 @@ HORARIOS_PADRAO = [
 ]
 
 # --- Configuração da Página do Streamlit ---
-st.set_page_config(page_title="Escalas Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Escala Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
 
 # --- Conexão com o Banco de Dados Supabase ---
 try:
@@ -33,20 +33,18 @@ except Exception:
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 
-# --- Funções de Normalização e Formatação ---
-def remover_acentos(texto: str) -> str:
-    texto_normalizado = unicodedata.normalize('NFD', texto)
-    return texto_normalizado.encode('ascii', 'ignore').decode('utf-8')
-
+# --- Funções de Formatação e Acesso a Dados ---
 def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
-# --- Funções de Acesso a Dados (com Cache e Limpeza) ---
 @st.cache_data(ttl=300)
 def carregar_colaboradores() -> pd.DataFrame:
     try:
-        return pd.DataFrame(supabase.rpc('get_colaboradores').execute().data)
+        df = pd.DataFrame(supabase.rpc('get_colaboradores').execute().data)
+        if not df.empty:
+            df['nome'] = df['nome'].str.strip()
+        return df
     except Exception as e: st.error(f"Erro ao carregar colaboradores: {e}"); return pd.DataFrame()
 
 @st.cache_data(ttl=60)
@@ -55,10 +53,10 @@ def carregar_todas_escalas() -> pd.DataFrame:
         df = pd.DataFrame(supabase.rpc('get_escalas').execute().data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            df['nome'] = df['nome'].str.strip()
         return df
     except Exception as e: st.error(f"Erro ao carregar todas as escalas: {e}"); return pd.DataFrame()
 
-# NOVA FUNÇÃO OTIMIZADA
 @st.cache_data(ttl=10)
 def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
     try:
@@ -67,6 +65,7 @@ def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            df['nome'] = df['nome'].str.strip()
         return df
     except Exception as e: st.error(f"Erro ao carregar escala da semana: {e}"); return pd.DataFrame()
 
@@ -104,20 +103,42 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-# --- Geração de PDF ---
+# --- Geração de PDF (Versão Corrigida e "Sanitizada") ---
 def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) -> bytes:
-    # (Esta função permanece a mesma)
-    pdf = FPDF(orientation='P', unit='mm', format='A4'); pdf.add_page()
-    pdf.set_font('Arial', 'B', 16); titulo_pdf = f"Escala de Trabalho - {remover_acentos(nome_colaborador)}"
-    pdf.cell(0, 10, titulo_pdf, 0, 1, 'C'); pdf.ln(5)
-    pdf.set_font('Arial', '', 10); data_emissao = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-    pdf.cell(0, 10, data_emissao, 0, 1, 'C'); pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12); pdf.set_fill_color(230, 230, 230)
-    pdf.cell(95, 10, 'Data', 1, 0, 'C', fill=True); pdf.cell(95, 10, 'Horario', 1, 1, 'C', fill=True)
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 16)
+
+    # "Sanitiza" o texto: força a codificação para um formato seguro (latin-1) e substitui caracteres inválidos.
+    def sanitizar_texto(texto):
+        return texto.encode('latin-1', 'replace').decode('latin-1')
+
+    # Título
+    titulo_pdf = f"Escala de Trabalho - {nome_colaborador}"
+    pdf.cell(0, 10, sanitizar_texto(titulo_pdf), 0, 1, 'C')
+    pdf.ln(5)
+
+    # Subtítulo com data da emissão
+    pdf.set_font('Arial', '', 10)
+    data_emissao = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    pdf.cell(0, 10, data_emissao, 0, 1, 'C')
+    pdf.ln(10)
+
+    # Cabeçalho da Tabela
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(95, 10, 'Data', 1, 0, 'C', fill=True)
+    pdf.cell(95, 10, 'Horario', 1, 1, 'C', fill=True)
+
+    # Corpo da Tabela
     pdf.set_font('Arial', '', 11)
     for _, row in df_escala.iterrows():
-        data_cell = str(row['Data']); horario_cell = remover_acentos(str(row['Horário']))
-        pdf.cell(95, 10, data_cell, 1, 0, 'C'); pdf.cell(95, 10, horario_cell, 1, 1, 'C')
+        data_cell = sanitizar_texto(str(row['Data']))
+        horario_cell = sanitizar_texto(str(row['Horário']))
+        pdf.cell(95, 10, data_cell, 1, 0, 'C')
+        pdf.cell(95, 10, horario_cell, 1, 1, 'C')
+
+    # Retorna o PDF como bytes
     return pdf.output()
 
 # --- Abas da Interface ---
@@ -131,13 +152,15 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas_toda
         with st.container(border=True):
             hoje = pd.Timestamp.today().normalize(); data_fim = hoje + timedelta(days=30)
             st.info(f"Mostrando a escala de **{nome_selecionado}** de hoje até {data_fim.strftime('%d/%m/%Y')}.")
+            # Compara nomes limpos para garantir correspondência
             resultados = df_escalas_todas[(df_escalas_todas["nome"].str.strip() == nome_selecionado.strip()) & (df_escalas_todas["data"] >= hoje) & (df_escalas_todas["data"] <= data_fim)].sort_values("data")
             if not resultados.empty:
                 resultados_display = resultados.copy(); resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa); resultados_display.rename(columns={"horario": "Horário"}, inplace=True)
                 st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
+                
                 st.markdown("---")
                 pdf_bytes = gerar_pdf_escala_individual(resultados_display[["Data", "Horário"]], nome_selecionado)
-                nome_arquivo = remover_acentos("".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip())
+                nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip()
                 st.download_button(label="🖨️ Baixar minha escala em PDF", data=pdf_bytes, file_name=f"escala_{nome_arquivo.replace(' ', '_').lower()}.pdf", mime="application/pdf")
             else: st.success(f"✅ **{nome_selecionado}**, você não possui escalas agendadas para este período.")
 
@@ -178,7 +201,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
         st.markdown("---")
 
         if colaborador and semana_selecionada:
-            # ARQUITETURA CORRIGIDA: Carrega apenas os dados da semana selecionada
             df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
             escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'].str.strip() == colaborador.strip()]
             
@@ -201,7 +223,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
                         st.cache_data.clear(); st.success("Escala da semana salva com sucesso!"); time.sleep(1); st.rerun()
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
-    # (Esta função permanece a mesma)
     st.subheader("👥 Gerenciar Colaboradores"); col1, col2 = st.columns(2)
     with col1:
         with st.container(border=True):
@@ -225,15 +246,13 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escalas Frente de Caixa")
+    st.title("📅 Escala Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
-    # Carregamos todas as escalas uma vez para a visão geral e consulta pública
     df_escalas_todas = carregar_todas_escalas()
     
     with st.sidebar:
         st.header("Modo de Acesso")
-        # (Lógica do sidebar permanece a mesma)
         if not st.session_state.logado:
             with st.form("login_form"):
                 st.markdown("##### 🔐 Acesso Restrito"); codigo = st.text_input("Código do Fiscal"); senha = st.text_input("Senha", type="password")
