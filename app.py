@@ -7,6 +7,7 @@ from supabase import create_client, Client
 import time
 from fpdf import FPDF # Importado para gerar PDF
 from io import BytesIO # Importado para gerar PDF
+import unicodedata # Importado para remover acentos
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -20,7 +21,7 @@ HORARIOS_PADRAO = [
 
 # --- Configuração da Página do Streamlit ---
 st.set_page_config(
-    page_title="Escala",
+    page_title="Escalas Frente de Caixa",
     page_icon="📅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -111,19 +112,27 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- Funções de Formatação e Geração de PDF ---
 
+def remover_acentos(texto: str) -> str:
+    """
+    Remove acentos de uma string, trocando por seus equivalentes sem acento.
+    Ex: 'Rogério' -> 'Rogerio'
+    """
+    texto_normalizado = unicodedata.normalize('NFD', texto)
+    return texto_normalizado.encode('ascii', 'ignore').decode('utf-8')
+
 def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
 def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) -> bytes:
-    """Gera um PDF simples com a escala de um único colaborador."""
+    """Gera um PDF simples com a escala de um único colaborador, removendo acentos."""
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_font('Arial', 'B', 16)
 
     # Título
-    titulo_pdf = f"Escala de Trabalho - {nome_colaborador}"
-    pdf.cell(0, 10, titulo_pdf.encode('latin-1', 'replace').decode('latin-1'), 0, 1, 'C')
+    titulo_pdf = f"Escala de Trabalho - {remover_acentos(nome_colaborador)}"
+    pdf.cell(0, 10, titulo_pdf, 0, 1, 'C')
     pdf.ln(5)
 
     # Subtítulo com data da emissão
@@ -141,12 +150,12 @@ def gerar_pdf_escala_individual(df_escala: pd.DataFrame, nome_colaborador: str) 
     # Corpo da Tabela
     pdf.set_font('Arial', '', 11)
     for _, row in df_escala.iterrows():
-        data_cell = str(row['Data']).encode('latin-1', 'replace').decode('latin-1')
-        horario_cell = str(row['Horário']).encode('latin-1', 'replace').decode('latin-1')
+        data_cell = str(row['Data'])
+        horario_cell = remover_acentos(str(row['Horário']))
         pdf.cell(95, 10, data_cell, 1, 0, 'C')
         pdf.cell(95, 10, horario_cell, 1, 1, 'C')
 
-    # Retorna o PDF como bytes (versão corrigida para fpdf2)
+    # Retorna o PDF como bytes
     return pdf.output()
 
 # --- Funções de Interface (Abas) ---
@@ -193,7 +202,7 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.
                 st.markdown("---")
                 pdf_bytes = gerar_pdf_escala_individual(resultados_display[["Data", "Horário"]], nome_selecionado)
                 
-                nome_arquivo = "".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip()
+                nome_arquivo = remover_acentos("".join(c for c in nome_selecionado if c.isalnum() or c in (' ', '_')).rstrip())
                 
                 st.download_button(
                     label="🖨️ Baixar minha escala em PDF",
@@ -247,14 +256,15 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas: pd.Dat
         with col1:
             opcoes_semana = {f"Semana de {d.strftime('%d/%m/%Y')}": d for d in semanas_iniciadas}
             semana_selecionada_str = st.selectbox("1. Selecione a semana para editar:", options=opcoes_semana.keys())
-            semana_selecionada = opcoes_semana[semana_selecionada_str]
+            if semana_selecionada_str:
+                semana_selecionada = opcoes_semana[semana_selecionada_str]
         with col2:
             nomes_lista = sorted(df_colaboradores["nome"].tolist())
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
 
         st.markdown("---")
 
-        if colaborador and semana_selecionada:
+        if colaborador and 'semana_selecionada' in locals():
             st.markdown(f"**Editando horários para:** `{colaborador}` | **Semana de:** `{semana_selecionada.strftime('%d/%m/%Y')}`")
             escala_semana_colab = df_escalas[
                 (df_escalas['nome'] == colaborador) &
@@ -318,7 +328,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escala")
+    st.title("📅 Escalas Frente de Caixa")
 
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
@@ -346,7 +356,7 @@ def main():
             if st.button("Logout", use_container_width=True):
                 st.session_state.logado = False; st.session_state.nome_logado = ""; st.cache_data.clear(); st.rerun()
         st.markdown("---")
-        st.info("Desenvolvido por @Rogério Souza")
+        st.info("Desenvolvido @Rogério Souza")
         st.write("Versão 2.0")
 
     if st.session_state.logado:
