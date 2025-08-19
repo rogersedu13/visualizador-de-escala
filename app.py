@@ -78,6 +78,14 @@ def salvar_escala_semanal(nome: str, horarios: list, semana_info: dict) -> bool:
         return True
     except Exception as e: st.error(f"Erro detalhado ao salvar semana: {e}"); return False
 
+# <<<<===== NOVA FUNÇÃO =====>>>>
+def apagar_semana(id_semana: int) -> bool:
+    try:
+        supabase.rpc('apagar_semana', {'p_semana_id': id_semana}).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao apagar semana: {e}"); return False
+
 def adicionar_colaborador(nome: str) -> bool:
     try:
         supabase.rpc('add_colaborador', {'p_nome': nome.strip()}).execute(); return True
@@ -92,31 +100,20 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
-# --- Geração de HTML ---
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=1, justify="center")
-    # A única mudança está aqui: a adição da tag <meta charset="UTF-8">
     html_template = f"""
-    <html>
-    <head>
-        <title>Escala de {nome_colaborador}</title>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
-            table {{ width: 80%; margin: 20px auto; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }}
-            th, td {{ padding: 12px 15px; text-align: center; border: 1px solid #ddd; }}
-            thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
-            p {{ text-align: center; color: #777; }}
-        </style>
-    </head>
-    <body>
-        <h1>Escala de Trabalho</h1>
-        <h2>{nome_colaborador}</h2>
-        <h2>{semana_str}</h2>
+    <html><head><title>Escala de {nome_colaborador}</title><meta charset="UTF-8"><style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
+        table {{ width: 80%; margin: 20px auto; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }}
+        th, td {{ padding: 12px 15px; text-align: center; border: 1px solid #ddd; }}
+        thead {{ background-color: #f2f2f2; font-weight: bold; }} tbody tr:nth-child(even) {{ background-color: #f9f9f9; }}
+        p {{ text-align: center; color: #777; }}
+    </style></head><body>
+        <h1>Escala de Trabalho</h1><h2>{nome_colaborador}</h2><h2>{semana_str}</h2>
         {tabela_html}
         <p>Documento gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
-    </body>
-    </html>
+    </body></html>
     """
     return html_template
 
@@ -131,8 +128,7 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
 
     if nome_selecionado:
         if df_semanas.empty:
-            st.info(f"**{nome_selecionado}**, ainda não há nenhuma semana de escala registrada no sistema.")
-            return
+            st.info(f"**{nome_selecionado}**, ainda não há nenhuma semana de escala registrada no sistema."); return
         
         opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
         semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
@@ -167,12 +163,37 @@ def aba_gerenciar_semanas(df_semanas: pd.DataFrame):
             with st.spinner(f"Inicializando semana de {data_inicio_semana.strftime('%d/%m')}..."):
                 if inicializar_semana_no_banco(data_inicio_semana):
                     st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
+
     with st.container(border=True):
         st.subheader("📋 Semanas Já Inicializadas")
-        if df_semanas.empty: st.info("Nenhuma semana foi inicializada ainda.")
+        if df_semanas.empty: 
+            st.info("Nenhuma semana foi inicializada ainda.")
         else:
-            df_display = df_semanas[['nome_semana']].rename(columns={'nome_semana': 'Semanas Disponíveis para Edição'})
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            # <<<<===== INTERFACE ATUALIZADA COM BOTÃO DE APAGAR =====>>>>
+            for _, semana in df_semanas.iterrows():
+                col1, col2 = st.columns([4, 1])
+                col1.write(semana['nome_semana'])
+                
+                # Botão de apagar com confirmação
+                if col2.button("Apagar", key=f"del_{semana['id']}", type="secondary"):
+                    st.session_state[f"confirm_delete_{semana['id']}"] = True
+
+                if st.session_state.get(f"confirm_delete_{semana['id']}"):
+                    st.warning(f"**Atenção!** Esta ação é irreversível. Você tem certeza que deseja apagar a **{semana['nome_semana']}** e todos os seus registros?")
+                    confirm_col1, confirm_col2 = st.columns(2)
+                    if confirm_col1.button("Sim, apagar esta semana", key=f"confirm_ok_{semana['id']}", type="primary"):
+                        with st.spinner("Apagando..."):
+                            if apagar_semana(semana['id']):
+                                st.success("Semana apagada com sucesso!")
+                                del st.session_state[f"confirm_delete_{semana['id']}"]
+                                st.cache_data.clear()
+                                time.sleep(1); st.rerun()
+                            else:
+                                del st.session_state[f"confirm_delete_{semana['id']}"]
+                    
+                    if confirm_col2.button("Cancelar", key=f"confirm_cancel_{semana['id']}"):
+                        del st.session_state[f"confirm_delete_{semana['id']}"]
+                        st.rerun()
 
 def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
     with st.container(border=True):
@@ -266,8 +287,6 @@ def main():
         with tab3: aba_gerenciar_colaboradores(df_colaboradores)
         with tab4: aba_consultar_escala_publica(df_colaboradores, df_semanas)
     else:
-        # Passamos também o df_semanas aqui, mesmo que possa estar vazio se não logado,
-        # a função de consulta agora lida com isso.
         aba_consultar_escala_publica(df_colaboradores, df_semanas)
 
 if __name__ == "__main__":
