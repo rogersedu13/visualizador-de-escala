@@ -62,6 +62,21 @@ def carregar_escalas() -> pd.DataFrame:
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame()
 
+# <<<<===== FUNÇÃO OTIMIZADA PARA BUSCAR SEMANAS =====>>>>
+@st.cache_data(ttl=10)
+def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
+    try:
+        params = {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}
+        response = supabase.rpc('get_escala_semana', params).execute()
+        df = pd.DataFrame(response.data)
+        if not df.empty:
+            df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            df['nome'] = df['nome'].str.strip()
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar escala da semana: {e}")
+        return pd.DataFrame()
+
 def get_semanas_iniciadas(df_escalas: pd.DataFrame) -> list[date]:
     if df_escalas.empty or 'data' not in df_escalas.columns:
         return []
@@ -102,7 +117,6 @@ def salvar_escala_semanal(nome: str, data_inicio: date, horarios: list) -> bool:
     except Exception as e: st.error(f"Erro detalhado ao salvar semana: {e}"); return False
 
 def apagar_semana_no_banco(data_inicio: date) -> bool:
-    """Chama a nova RPC do Supabase para apagar a escala da semana."""
     try:
         supabase.rpc('apagar_escala_semana', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
         return True
@@ -132,10 +146,7 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome para visualizar sua escala para os próximos 30 dias.")
-
-    if df_colaboradores.empty:
-        st.warning("Nenhum colaborador cadastrado no momento.")
-        return
+    if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("Selecione seu nome:", options=nomes_disponiveis, index=0)
@@ -151,7 +162,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.
                 (df_escalas['data'] >= hoje) &
                 (df_escalas['data'] <= data_fim)
             ].sort_values("data")
-
             if not resultados.empty:
                 resultados_display = resultados.copy()
                 resultados_display["Data"] = resultados_display["data"].apply(formatar_data_completa)
@@ -159,7 +169,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.
                 st.dataframe(resultados_display[["Data", "Horário"]], use_container_width=True, hide_index=True)
             else:
                 st.success(f"✅ **{nome_selecionado}**, você não possui escalas agendadas para este período.")
-
 
 def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.DataFrame):
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
@@ -183,13 +192,10 @@ def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.D
                 col1, col2 = st.columns([3, 1])
                 semana_fim = semana + timedelta(days=6)
                 col1.write(f"Semana de {semana.strftime('%d/%m/%Y')} a {semana_fim.strftime('%d/%m/%Y')}")
-                
-                # Botão de apagar com confirmação
                 if col2.button("Apagar", key=f"del_{semana}", type="secondary"):
                     st.session_state[f"confirm_delete_{semana}"] = True
-
                 if st.session_state.get(f"confirm_delete_{semana}"):
-                    st.warning(f"**Atenção!** Esta ação é irreversível. Você tem certeza que deseja apagar todos os registros da semana de {semana.strftime('%d/%m')}?")
+                    st.warning(f"**Atenção!** Você tem certeza que deseja apagar todos os registros da semana de {semana.strftime('%d/%m')}?")
                     confirm_col1, confirm_col2 = st.columns(2)
                     if confirm_col1.button("Sim, apagar esta semana", key=f"confirm_ok_{semana}", type="primary"):
                         with st.spinner("Apagando..."):
@@ -197,11 +203,9 @@ def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.D
                                 st.success("Semana apagada com sucesso!")
                                 del st.session_state[f"confirm_delete_{semana}"]
                                 st.cache_data.clear()
-                                time.sleep(1)
-                                st.rerun()
+                                time.sleep(1); st.rerun()
                             else:
                                 del st.session_state[f"confirm_delete_{semana}"]
-                    
                     if confirm_col2.button("Cancelar", key=f"confirm_cancel_{semana}"):
                         del st.session_state[f"confirm_delete_{semana}"]
                         st.rerun()
@@ -223,10 +227,17 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
         
         st.markdown("---")
+
+        # <<<<===== LÓGICA CORRIGIDA E ROBUSTA =====>>>>
         if colaborador and semana_selecionada:
-            escala_semana_colab = df_escalas_todas[(df_escalas_todas['nome'] == colaborador) & (df_escalas_todas['data'].dt.date >= semana_selecionada) & (df_escalas_todas['data'].dt.date <= semana_selecionada + timedelta(days=6))].sort_values('data')
+            # 1. Busca os dados apenas da semana selecionada de forma otimizada
+            df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
+            # 2. Filtra para o colaborador específico
+            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
+            
             st.markdown(f"**Editando horários para:** `{colaborador}` | **Semana de:** `{semana_selecionada.strftime('%d/%m/%Y')}`")
             horarios_atuais = {row['data'].date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
+            
             cols = st.columns(7); horarios_novos = []
             for i in range(7):
                 dia_da_semana = semana_selecionada + timedelta(days=i)
@@ -269,7 +280,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 
 # --- Estrutura Principal da Aplicação ---
 def main():
-    st.title("📅 Escala Frende Caixa")
+    st.title("📅 Escala Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
     df_escalas_todas = carregar_escalas()
