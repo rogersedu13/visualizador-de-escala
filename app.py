@@ -18,7 +18,7 @@ HORARIOS_PADRAO = [
 
 # --- Configuração da Página do Streamlit ---
 st.set_page_config(
-    page_title="Escala Frente de Caixa",
+    page_title="WEscala Frente de Caixa",
     page_icon="📅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -62,7 +62,6 @@ def carregar_escalas() -> pd.DataFrame:
         st.error(f"Erro ao carregar escalas: {e}")
         return pd.DataFrame()
 
-# <<<<===== FUNÇÃO OTIMIZADA PARA BUSCAR SEMANAS =====>>>>
 @st.cache_data(ttl=10)
 def carregar_escala_semana(data_inicio: date) -> pd.DataFrame:
     try:
@@ -227,9 +226,8 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
             colaborador = st.selectbox("2. Selecione o colaborador:", nomes_lista)
         
         st.markdown("---")
-
-        # <<<<===== LÓGICA CORRIGIDA E ROBUSTA =====>>>>
         if colaborador and semana_selecionada:
+            # <<<<===== LÓGICA CORRIGIDA E ROBUSTA =====>>>>
             # 1. Busca os dados apenas da semana selecionada de forma otimizada
             df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
             # 2. Filtra para o colaborador específico
