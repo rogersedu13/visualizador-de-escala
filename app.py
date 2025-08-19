@@ -45,9 +45,12 @@ def carregar_colaboradores() -> pd.DataFrame:
     except Exception as e: st.error(f"Erro ao carregar colaboradores: {e}"); return pd.DataFrame()
 
 @st.cache_data(ttl=60)
-def carregar_indice_semanas() -> pd.DataFrame:
+def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
     try:
-        response = supabase.table('semanas').select('id, nome_semana, data_inicio').order('data_inicio', desc=True).execute()
+        query = supabase.table('semanas').select('id, nome_semana, data_inicio, ativa').order('data_inicio', desc=True)
+        if apenas_ativas:
+            query = query.eq('ativa', True)
+        response = query.execute()
         return pd.DataFrame(response.data)
     except Exception as e: st.error(f"Erro ao carregar índice de semanas: {e}"); return pd.DataFrame()
 
@@ -78,13 +81,15 @@ def salvar_escala_semanal(nome: str, horarios: list, semana_info: dict) -> bool:
         return True
     except Exception as e: st.error(f"Erro detalhado ao salvar semana: {e}"); return False
 
-# <<<<===== NOVA FUNÇÃO =====>>>>
-def apagar_semana(id_semana: int) -> bool:
+def arquivar_reativar_semana(id_semana: int, novo_status: bool):
     try:
-        supabase.rpc('apagar_semana', {'p_semana_id': id_semana}).execute()
+        if novo_status: # True para reativar
+            supabase.rpc('reativar_semana', {'p_semana_id': id_semana}).execute()
+        else: # False para arquivar
+            supabase.rpc('arquivar_semana', {'p_semana_id': id_semana}).execute()
         return True
     except Exception as e:
-        st.error(f"Erro ao apagar semana: {e}"); return False
+        st.error(f"Erro ao alterar status da semana: {e}"); return False
 
 def adicionar_colaborador(nome: str) -> bool:
     try:
@@ -118,7 +123,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     return html_template
 
 # --- Abas da Interface ---
-def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
+def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome e a semana que deseja visualizar.")
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
@@ -127,10 +132,11 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
     nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis, index=0)
 
     if nome_selecionado:
-        if df_semanas.empty:
-            st.info(f"**{nome_selecionado}**, ainda não há nenhuma semana de escala registrada no sistema."); return
+        if df_semanas_ativas.empty:
+            st.info(f"**{nome_selecionado}**, ainda não há nenhuma semana de escala registrada no sistema.")
+            return
         
-        opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
+        opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
         semana_selecionada_str = st.selectbox("2. Selecione a semana que deseja visualizar:", options=opcoes_semana.keys())
 
         if semana_selecionada_str:
@@ -151,9 +157,9 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas: pd.
                     href = f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_{nome_arquivo}_{semana_info["data_inicio"].strftime("%Y%m%d")}.html" style="display: inline-block; padding: 0.5em 1em; background-color: #0068c9; color: white; text-align: center; text-decoration: none; border-radius: 0.25rem;">🖨️ Gerar Versão para Impressão/PDF</a>'
                     st.markdown(href, unsafe_allow_html=True); st.caption("Dica: após abrir o arquivo, use Ctrl+P para imprimir ou salvar como PDF.")
                 else:
-                    st.warning(f"**{nome_selecionado}**, você não possui horários definidos para esta semana específica.")
+                    st.info(f"**{nome_selecionado}**, você não possui horários definidos para esta semana específica.")
 
-def aba_gerenciar_semanas(df_semanas: pd.DataFrame):
+def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     with st.container(border=True):
         st.subheader("➕ Inicializar Nova Semana de Escala")
         hoje = date.today(); data_padrao = hoje - timedelta(days=hoje.weekday())
@@ -164,46 +170,45 @@ def aba_gerenciar_semanas(df_semanas: pd.DataFrame):
                 if inicializar_semana_no_banco(data_inicio_semana):
                     st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
 
-    with st.container(border=True):
-        st.subheader("📋 Semanas Já Inicializadas")
-        if df_semanas.empty: 
-            st.info("Nenhuma semana foi inicializada ainda.")
+    st.subheader("📋 Gerenciamento de Semanas")
+    tab_ativas, tab_arquivadas = st.tabs(["Semanas Ativas", "Semanas Arquivadas"])
+    
+    with tab_ativas:
+        df_semanas_ativas = df_semanas_todas[df_semanas_todas['ativa'] == True]
+        if df_semanas_ativas.empty:
+            st.info("Nenhuma semana ativa.")
         else:
-            # <<<<===== INTERFACE ATUALIZADA COM BOTÃO DE APAGAR =====>>>>
-            for _, semana in df_semanas.iterrows():
+            for _, semana in df_semanas_ativas.iterrows():
                 col1, col2 = st.columns([4, 1])
                 col1.write(semana['nome_semana'])
-                
-                # Botão de apagar com confirmação
-                if col2.button("Apagar", key=f"del_{semana['id']}", type="secondary"):
-                    st.session_state[f"confirm_delete_{semana['id']}"] = True
+                if col2.button("Arquivar", key=f"archive_{semana['id']}", type="secondary"):
+                    if arquivar_reativar_semana(semana['id'], False):
+                        st.success(f"{semana['nome_semana']} arquivada.")
+                        st.cache_data.clear(); time.sleep(1); st.rerun()
 
-                if st.session_state.get(f"confirm_delete_{semana['id']}"):
-                    st.warning(f"**Atenção!** Esta ação é irreversível. Você tem certeza que deseja apagar a **{semana['nome_semana']}** e todos os seus registros?")
-                    confirm_col1, confirm_col2 = st.columns(2)
-                    if confirm_col1.button("Sim, apagar esta semana", key=f"confirm_ok_{semana['id']}", type="primary"):
-                        with st.spinner("Apagando..."):
-                            if apagar_semana(semana['id']):
-                                st.success("Semana apagada com sucesso!")
-                                del st.session_state[f"confirm_delete_{semana['id']}"]
-                                st.cache_data.clear()
-                                time.sleep(1); st.rerun()
-                            else:
-                                del st.session_state[f"confirm_delete_{semana['id']}"]
-                    
-                    if confirm_col2.button("Cancelar", key=f"confirm_cancel_{semana['id']}"):
-                        del st.session_state[f"confirm_delete_{semana['id']}"]
-                        st.rerun()
+    with tab_arquivadas:
+        df_semanas_arquivadas = df_semanas_todas[df_semanas_todas['ativa'] == False]
+        if df_semanas_arquivadas.empty:
+            st.info("Nenhuma semana arquivada.")
+        else:
+            for _, semana in df_semanas_arquivadas.iterrows():
+                col1, col2 = st.columns([4, 1])
+                col1.write(semana['nome_semana'])
+                if col2.button("Reativar", key=f"reactivate_{semana['id']}", type="primary"):
+                    if arquivar_reativar_semana(semana['id'], True):
+                        st.success(f"{semana['nome_semana']} reativada.")
+                        st.cache_data.clear(); time.sleep(1); st.rerun()
 
-def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.DataFrame):
+
+def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     with st.container(border=True):
         st.subheader("✏️ Editar Escala Semanal")
-        if df_semanas.empty or df_colaboradores.empty: st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
+        if df_semanas_ativas.empty or df_colaboradores.empty: st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
 
         col1, col2 = st.columns(2)
         with col1:
-            opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas.iterrows()}
-            semana_selecionada_str = st.selectbox("1. Selecione a semana para editar:", options=opcoes_semana.keys())
+            opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
+            semana_selecionada_str = st.selectbox("1. Selecione uma semana ativa para editar:", options=opcoes_semana.keys())
             semana_info = opcoes_semana.get(semana_selecionada_str)
         with col2:
             nomes_lista = sorted(df_colaboradores["nome"].tolist())
@@ -214,7 +219,10 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas: pd.Dat
             id_semana = semana_info['id']
             data_inicio_semana = semana_info['data_inicio']
             df_escala_semana_atual = carregar_escala_semana_por_id(id_semana)
-            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
+            
+            escala_semana_colab = pd.DataFrame()
+            if not df_escala_semana_atual.empty:
+                escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
             
             st.markdown(f"**Editando horários para:** `{colaborador}` | `{semana_selecionada_str}`")
             horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
@@ -262,7 +270,7 @@ def main():
     st.title("📅 Escala Frente de Caixa")
     df_fiscais = carregar_fiscais()
     df_colaboradores = carregar_colaboradores()
-    df_semanas = carregar_indice_semanas()
+    df_semanas_todas = carregar_indice_semanas()
     
     with st.sidebar:
         st.header("Modo de Acesso")
@@ -279,15 +287,18 @@ def main():
             if st.button("Logout", use_container_width=True): st.session_state.logado = False; st.session_state.nome_logado = ""; st.cache_data.clear(); st.rerun()
         st.markdown("---"); st.info("Desenvolvido por Rogério Souza"); st.write("Versão 2.0")
 
+    # Filtra as semanas para mostrar apenas as ativas nas abas de edição e consulta
+    df_semanas_ativas = df_semanas_todas[df_semanas_todas['ativa'] == True] if 'ativa' in df_semanas_todas.columns else df_semanas_todas
+
     if st.session_state.logado:
         tabs = ["Gerenciar Semanas 🗓️", "Editar Escala Semanal ✏️", "Gerenciar Colaboradores 👥", "Consultar Individualmente 🔎"]
         tab1, tab2, tab3, tab4 = st.tabs(tabs)
-        with tab1: aba_gerenciar_semanas(df_semanas)
-        with tab2: aba_editar_escala_semanal(df_colaboradores, df_semanas)
+        with tab1: aba_gerenciar_semanas(df_semanas_todas) # A gerência vê todas, ativas e inativas
+        with tab2: aba_editar_escala_semanal(df_colaboradores, df_semanas_ativas) # Edição só em semanas ativas
         with tab3: aba_gerenciar_colaboradores(df_colaboradores)
-        with tab4: aba_consultar_escala_publica(df_colaboradores, df_semanas)
+        with tab4: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas) # Consulta só de semanas ativas
     else:
-        aba_consultar_escala_publica(df_colaboradores, df_semanas)
+        aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
 if __name__ == "__main__":
     main()
