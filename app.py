@@ -18,7 +18,7 @@ HORARIOS_PADRAO = [
 
 # --- Configuração da Página do Streamlit ---
 st.set_page_config(
-    page_title="WEscala Frente de Caixa",
+    page_title="Escala Frente de Caixa",
     page_icon="📅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -37,7 +37,7 @@ except Exception:
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 
-# --- Funções de Acesso a Dados (com Cache e Limpeza) ---
+# --- Funções de Acesso a Dados ---
 @st.cache_data(ttl=300)
 def carregar_colaboradores() -> pd.DataFrame:
     try:
@@ -113,7 +113,9 @@ def salvar_escala_semanal(nome: str, data_inicio: date, horarios: list) -> bool:
             data_dia = data_inicio + timedelta(days=i)
             supabase.rpc('save_escala_dia_final', {'p_nome': nome.strip(), 'p_data': data_dia.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
         return True
-    except Exception as e: st.error(f"Erro detalhado ao salvar semana: {e}"); return False
+    except Exception as e: 
+        st.error(f"Erro detalhado ao salvar semana: {e}")
+        return False
 
 def apagar_semana_no_banco(data_inicio: date) -> bool:
     try:
@@ -125,27 +127,36 @@ def apagar_semana_no_banco(data_inicio: date) -> bool:
 
 def adicionar_colaborador(nome: str) -> bool:
     try:
-        supabase.rpc('add_colaborador', {'p_nome': nome.strip()}).execute(); return True
-    except Exception as e: st.error(f"Erro: {e}"); return False
+        supabase.rpc('add_colaborador', {'p_nome': nome.strip()}).execute()
+        return True
+    except Exception as e: 
+        st.error(f"Erro: {e}")
+        return False
 
 def remover_colaboradores(lista_nomes: list) -> bool:
     try:
-        supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
-    except Exception as e: st.error(f"Erro: {e}"); return False
+        supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute()
+        return True
+    except Exception as e: 
+        st.error(f"Erro: {e}")
+        return False
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
 def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
-    if pd.isna(data_timestamp): return ""
+    if pd.isna(data_timestamp): 
+        return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
 # --- Abas da Interface ---
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_escalas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome para visualizar sua escala para os próximos 30 dias.")
-    if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
+    if df_colaboradores.empty: 
+        st.warning("Nenhum colaborador cadastrado.")
+        return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("Selecione seu nome:", options=nomes_disponiveis, index=0)
@@ -173,14 +184,19 @@ def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.D
     semanas_iniciadas = get_semanas_iniciadas(df_escalas_todas)
     with st.container(border=True):
         st.subheader("➕ Inicializar Nova Semana de Escala")
-        hoje = date.today(); data_padrao = hoje - timedelta(days=hoje.weekday())
+        hoje = date.today()
+        data_padrao = hoje - timedelta(days=hoje.weekday())
         data_selecionada = st.date_input("Selecione o dia de início da semana:", value=data_padrao)
         if st.button("🗓️ Inicializar Semana", type="primary", use_container_width=True):
             if df_colaboradores.empty:
-                st.error("Não há colaboradores cadastrados para inicializar a semana."); return
+                st.error("Não há colaboradores cadastrados para inicializar a semana.")
+                return
             data_inicio_semana = data_selecionada - timedelta(days=data_selecionada.weekday())
             if inicializar_semana_no_banco(data_inicio_semana, df_colaboradores):
-                st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1); st.rerun()
+                st.cache_data.clear()
+                st.success("Semana inicializada com sucesso!")
+                time.sleep(1)
+                st.rerun()
 
     with st.container(border=True):
         st.subheader("📋 Semanas Já Inicializadas")
@@ -202,7 +218,8 @@ def aba_gerenciar_semanas(df_colaboradores: pd.DataFrame, df_escalas_todas: pd.D
                                 st.success("Semana apagada com sucesso!")
                                 del st.session_state[f"confirm_delete_{semana}"]
                                 st.cache_data.clear()
-                                time.sleep(1); st.rerun()
+                                time.sleep(1)
+                                st.rerun()
                             else:
                                 del st.session_state[f"confirm_delete_{semana}"]
                     if confirm_col2.button("Cancelar", key=f"confirm_cancel_{semana}"):
@@ -214,7 +231,8 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
     with st.container(border=True):
         st.subheader("✏️ Editar Escala Semanal")
         if not semanas_iniciadas or df_colaboradores.empty:
-            st.warning("Adicione colaboradores e inicialize uma semana para começar."); return
+            st.warning("Adicione colaboradores e inicialize uma semana para começar.")
+            return
 
         col1, col2 = st.columns(2)
         with col1:
@@ -227,16 +245,20 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
         
         st.markdown("---")
         if colaborador and semana_selecionada:
-            # <<<<===== LÓGICA CORRIGIDA E ROBUSTA =====>>>>
-            # 1. Busca os dados apenas da semana selecionada de forma otimizada
             df_escala_semana_atual = carregar_escala_semana(semana_selecionada)
-            # 2. Filtra para o colaborador específico
-            escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
+            
+            # <<<<===== AQUI ESTÁ A CORREÇÃO =====>>>>
+            # Adiciona uma verificação para garantir que o DataFrame não está vazio antes de filtrar
+            if not df_escala_semana_atual.empty:
+                escala_semana_colab = df_escala_semana_atual[df_escala_semana_atual['nome'] == colaborador]
+            else:
+                escala_semana_colab = pd.DataFrame() # Cria um DataFrame vazio para evitar erros
             
             st.markdown(f"**Editando horários para:** `{colaborador}` | **Semana de:** `{semana_selecionada.strftime('%d/%m/%Y')}`")
             horarios_atuais = {row['data'].date(): row['horario'] for _, row in escala_semana_colab.iterrows()}
             
-            cols = st.columns(7); horarios_novos = []
+            cols = st.columns(7)
+            horarios_novos = []
             for i in range(7):
                 dia_da_semana = semana_selecionada + timedelta(days=i)
                 dia_str = f"{DIAS_SEMANA_PT[i]} ({dia_da_semana.strftime('%d/%m')})"
@@ -250,17 +272,27 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_escalas_todas: 
             if st.button("💾 Salvar Escala da Semana", type="primary", use_container_width=True):
                 with st.spinner("Salvando alterações..."):
                     if salvar_escala_semanal(colaborador, semana_selecionada, horarios_novos):
-                        st.cache_data.clear(); st.success("Escala da semana salva com sucesso!"); time.sleep(1); st.rerun()
+                        st.cache_data.clear()
+                        st.success("Escala da semana salva com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
-    st.subheader("👥 Gerenciar Colaboradores"); col1, col2 = st.columns(2)
+    st.subheader("👥 Gerenciar Colaboradores")
+    col1, col2 = st.columns(2)
     with col1:
         with st.container(border=True):
-            st.markdown("##### ➕ Adicionar Novo Colaborador"); novo_nome = st.text_input("Nome do colaborador:", key="novo_nome").strip()
+            st.markdown("##### ➕ Adicionar Novo Colaborador")
+            novo_nome = st.text_input("Nome do colaborador:", key="novo_nome").strip()
             if st.button("Adicionar", use_container_width=True):
                 if novo_nome and (df_colaboradores.empty or novo_nome not in df_colaboradores["nome"].values):
-                    if adicionar_colaborador(novo_nome): st.cache_data.clear(); st.success(f"'{novo_nome}' adicionado!"); time.sleep(1); st.rerun()
-                else: st.error("Nome inválido ou já existente.")
+                    if adicionar_colaborador(novo_nome): 
+                        st.cache_data.clear()
+                        st.success(f"'{novo_nome}' adicionado!")
+                        time.sleep(1)
+                        st.rerun()
+                else: 
+                    st.error("Nome inválido ou já existente.")
     with col2:
         with st.container(border=True):
             st.markdown("##### ➖ Remover Colaboradores")
@@ -269,10 +301,16 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                 if st.button("Remover Selecionados", type="secondary", use_container_width=True):
                     if nomes_para_remover:
                         if remover_colaboradores(nomes_para_remover):
-                            st.cache_data.clear(); st.success("Removidos com sucesso!"); time.sleep(1); st.rerun()
-                    else: st.warning("Nenhum nome selecionado.")
-            else: st.info("Não há colaboradores para remover.")
-    st.markdown("---"); st.markdown("##### 📋 Lista de Colaboradores Atuais")
+                            st.cache_data.clear()
+                            st.success("Removidos com sucesso!")
+                            time.sleep(1)
+                            st.rerun()
+                    else: 
+                        st.warning("Nenhum nome selecionado.")
+            else: 
+                st.info("Não há colaboradores para remover.")
+    st.markdown("---")
+    st.markdown("##### 📋 Lista de Colaboradores Atuais")
     if not df_colaboradores.empty:
         st.dataframe(df_colaboradores[['nome']].sort_values('nome'), use_container_width=True, hide_index=True)
 
@@ -287,19 +325,28 @@ def main():
         st.header("Modo de Acesso")
         if not st.session_state.logado:
             with st.form("login_form"):
-                st.markdown("##### 🔐 Acesso Restrito"); codigo = st.text_input("Código do Fiscal"); senha = st.text_input("Senha", type="password")
+                st.markdown("##### 🔐 Acesso Restrito")
+                codigo = st.text_input("Código do Fiscal")
+                senha = st.text_input("Senha", type="password")
                 if st.form_submit_button("Entrar", type="primary", use_container_width=True):
-                    fiscal_auth = pd.DataFrame();
-                    if codigo.isdigit(): fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))]
+                    fiscal_auth = pd.DataFrame()
+                    if codigo.isdigit(): 
+                        fiscal_auth = df_fiscais[(df_fiscais["codigo"] == int(codigo)) & (df_fiscais["senha"] == str(senha))]
                     if not fiscal_auth.empty:
-                        st.session_state.logado = True; st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]; st.rerun()
+                        st.session_state.logado = True
+                        st.session_state.nome_logado = fiscal_auth.iloc[0]["nome"]
+                        st.rerun()
                     else:
                         st.error("Código ou senha incorretos.")
         else:
             st.success(f"Bem-vindo, **{st.session_state.nome_logado}**!")
             if st.button("Logout", use_container_width=True):
-                st.session_state.logado = False; st.session_state.nome_logado = ""; st.cache_data.clear(); st.rerun()
-        st.markdown("---"); st.info("Desenvolvido por @Rogerio Souza")
+                st.session_state.logado = False
+                st.session_state.nome_logado = ""
+                st.cache_data.clear()
+                st.rerun()
+        st.markdown("---")
+        st.info("Desenvolvido por @Rogerio Souza")
 
     if st.session_state.logado:
         tabs = ["Gerenciar Semanas 🗓️", "Editar Escala Semanal ✏️", "Gerenciar Colaboradores 👥", "Consultar Individualmente 🔎"]
