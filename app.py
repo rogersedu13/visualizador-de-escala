@@ -123,57 +123,6 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     return html_template
 
 # --- Abas da Interface ---
-
-# NOVO: A função para o Dashboard de Contagem
-def aba_dashboard_horarios(df_semanas_ativas: pd.DataFrame):
-    st.subheader("📊 Dashboard de Contagem por Horário")
-    st.markdown("Veja quantos colaboradores estão escalados em cada horário para a semana selecionada.")
-
-    if df_semanas_ativas.empty:
-        st.warning("Nenhuma semana ativa para analisar. Vá para 'Gerenciar Semanas' para reativar ou inicializar uma semana."); return
-
-    opcoes_semana = {row['nome_semana']: {'id': row['id']} for index, row in df_semanas_ativas.iterrows()}
-    semana_selecionada_str = st.selectbox("Selecione a semana para analisar:", options=opcoes_semana.keys())
-
-    if semana_selecionada_str:
-        semana_id = opcoes_semana[semana_selecionada_str]['id']
-        with st.spinner("Carregando dados da escala..."):
-            df_escala = carregar_escala_semana_por_id(semana_id)
-
-        if df_escala.empty:
-            st.info("Não há horários lançados para esta semana.")
-            return
-
-        # Filtra apenas horários de trabalho (ignora Folga, Ferias, etc.)
-        horarios_de_nao_trabalho = ["", "Folga", "Ferias", "Afastado(a)", "Atestado"]
-        df_trabalho = df_escala[~df_escala['horario'].isin(horarios_de_nao_trabalho)]
-
-        if df_trabalho.empty:
-            st.info("Nenhum horário de trabalho efetivo definido para esta semana.")
-            return
-
-        # Adiciona o nome do dia da semana para agrupar e ordenar
-        df_trabalho['weekday'] = df_trabalho['data'].dt.weekday
-        df_trabalho['dia_semana'] = df_trabalho['data'].apply(lambda x: DIAS_SEMANA_PT[x.weekday()])
-        
-        # Faz a contagem
-        contagem = df_trabalho.groupby(['weekday', 'dia_semana', 'horario']).size().reset_index(name='contagem')
-        
-        # Pivota a tabela para o formato final
-        try:
-            tabela_final = contagem.pivot_table(index='horario', columns=['weekday', 'dia_semana'], values='contagem').fillna(0).astype(int)
-            
-            # Ordena as colunas na ordem correta da semana
-            tabela_final = tabela_final.sort_index(axis=1, level='weekday')
-            
-            # Formata o nome das colunas para melhor visualização
-            tabela_final.columns = tabela_final.columns.get_level_values('dia_semana')
-            
-            st.dataframe(tabela_final, use_container_width=True)
-        except Exception as e:
-            st.error(f"Ocorreu um erro ao gerar a tabela de contagem: {e}")
-            st.dataframe(contagem) # Mostra os dados brutos em caso de erro
-
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("🔎 Consultar Minha Escala")
     st.markdown("Selecione seu nome e a semana que deseja visualizar.")
@@ -342,20 +291,12 @@ def main():
     df_semanas_ativas = df_semanas_todas[df_semanas_todas['ativa'] == True] if 'ativa' in df_semanas_todas.columns else df_semanas_todas
 
     if st.session_state.logado:
-        # MODIFICADO: Adicionada a nova aba do Dashboard e reorganizadas as abas
-        tabs = ["📊 Dashboard", "🗓️ Gerenciar Semanas", "✏️ Editar Escala", "👥 Gerenciar Colaboradores", "🔎 Consultar"]
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(tabs)
-        
-        with tab1:
-            aba_dashboard_horarios(df_semanas_ativas) # Usa apenas semanas ativas para consistência
-        with tab2:
-            aba_gerenciar_semanas(df_semanas_todas)
-        with tab3:
-            aba_editar_escala_semanal(df_colaboradores, df_semanas_ativas)
-        with tab4:
-            aba_gerenciar_colaboradores(df_colaboradores)
-        with tab5:
-            aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
+        tabs = ["Gerenciar Semanas 🗓️", "Editar Escala Semanal ✏️", "Gerenciar Colaboradores 👥", "Consultar Individualmente 🔎"]
+        tab1, tab2, tab3, tab4 = st.tabs(tabs)
+        with tab1: aba_gerenciar_semanas(df_semanas_todas) # A gerência vê todas, ativas e inativas
+        with tab2: aba_editar_escala_semanal(df_colaboradores, df_semanas_ativas) # Edição só em semanas ativas
+        with tab3: aba_gerenciar_colaboradores(df_colaboradores)
+        with tab4: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas) # Consulta só de semanas ativas
     else:
         aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
