@@ -18,7 +18,7 @@ HORARIOS_PADRAO = [
 ]
 
 # --- Configuração da Página do Streamlit ---
-st.set_page_config(page_title="Escala Frente de Caixa Pro", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Escala Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
 
 # --- Conexão com o Banco de Dados Supabase ---
 try:
@@ -73,7 +73,6 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
 def salvar_grade_massa(df_edited: pd.DataFrame, mapeamento_datas: dict) -> bool:
     """
     Função otimizada para salvar a grade inteira.
-    Recebe o DataFrame editado e um dicionário {NomeColuna: DataReal}.
     """
     try:
         # Converter a grade de volta para formato de banco de dados (melt)
@@ -95,63 +94,30 @@ def salvar_grade_massa(df_edited: pd.DataFrame, mapeamento_datas: dict) -> bool:
                     'p_horario': horario if horario else ""
                 }).execute()
             
-            # Atualiza barra a cada 5 registros para não travar a UI
             if i % 5 == 0:
                 barra_progresso.progress((i + 1) / total_ops, text=f"Salvando {i+1}/{total_ops}...")
         
         barra_progresso.empty()
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar em massa: {e}")
+        st.error(f"Erro ao salvar: {e}")
         return False
 
-def inicializar_semana_inteligente(data_inicio: date, tentar_copiar: bool = True) -> bool:
+def inicializar_semana_simples(data_inicio: date) -> bool:
     """
-    Inicializa a semana. Se tentar_copiar=True, busca a semana anterior e copia os horários.
+    Inicializa a semana sempre em branco
     """
     try:
-        # 1. Cria a semana no banco (tabela semanas) se não existir
+        # 1. Cria a semana na tabela 'semanas'
         supabase.rpc('inicializar_escala_semanal', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
         
-        # 2. Lógica de cópia
-        copiou = False
-        if tentar_copiar:
-            # Busca a semana imediatamente anterior (7 dias antes)
-            data_anterior = data_inicio - timedelta(days=7)
-            # Precisamos do ID da semana anterior. Consultamos pelo data_inicio.
-            res = supabase.table('semanas').select('id').eq('data_inicio', data_anterior.strftime('%Y-%m-%d')).execute()
-            
-            if res.data and len(res.data) > 0:
-                id_anterior = res.data[0]['id']
-                df_anterior = carregar_escala_semana_por_id(id_anterior)
-                
-                if not df_anterior.empty:
-                    st.toast(f"Encontrada semana anterior ({data_anterior.strftime('%d/%m')}). Copiando estrutura...")
-                    barra = st.progress(0, text="Clonando semana anterior...")
-                    total = len(df_anterior)
-                    
-                    for i, row in df_anterior.iterrows():
-                        # Calcula a nova data (data antiga + 7 dias)
-                        nova_data = pd.to_datetime(row['data']).date() + timedelta(days=7)
-                        supabase.rpc('save_escala_dia_final', {
-                            'p_nome': row['nome'], 
-                            'p_data': nova_data.strftime('%Y-%m-%d'), 
-                            'p_horario': row['horario']
-                        }).execute()
-                        if i % 10 == 0: barra.progress((i+1)/total)
-                    
-                    barra.empty()
-                    copiou = True
-        
-        if not copiou:
-            # Se não copiou (ou não quis), inicializa vazio para todos os colaboradores
-            st.toast("Inicializando semana vazia...")
-            df_colabs = carregar_colaboradores()
-            if not df_colabs.empty:
-                for nome in df_colabs['nome']:
-                    for i in range(7):
-                        d = data_inicio + timedelta(days=i)
-                        supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': ''}).execute()
+        # 2. Inicializa vazio para todos os colaboradores para garantir que apareçam na grade
+        df_colabs = carregar_colaboradores()
+        if not df_colabs.empty:
+            for nome in df_colabs['nome']:
+                for i in range(7):
+                    d = data_inicio + timedelta(days=i)
+                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': ''}).execute()
         
         return True
     except Exception as e:
@@ -177,7 +143,7 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
-    # fiscais fixos
+    # Fiscais Hardcoded (Sem banco de dados)
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
@@ -221,7 +187,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
                     display.rename(columns={"horario": "Horário"}, inplace=True)
                     st.dataframe(display[["Data", "Horário"]], use_container_width=True, hide_index=True)
                     
-                    # Download
                     html = gerar_html_escala(display[["Data", "Horário"]], nome_selecionado, semana_str)
                     b64 = base64.b64encode(html.encode('utf-8')).decode()
                     nome_arq = f"escala_{nome_selecionado.strip().replace(' ','_')}.html"
@@ -233,28 +198,21 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     st.subheader("🗓️ Gerenciar Semanas")
     
     with st.container(border=True):
-        st.markdown("##### ➕ Nova Semana")
+        st.markdown("##### ➕ Inicializar Nova Semana")
         hoje = date.today()
         # Calcula a próxima segunda-feira padrão
         prox_segunda = hoje + timedelta(days=(7 - hoje.weekday()))
         data_sel = st.date_input("Início da Semana (Segunda-feira):", value=prox_segunda)
         
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("✨ Inicializar (Clonar Anterior)", help="Cria a semana copiando os horários da semana passada", use_container_width=True):
-                data_inicio = data_sel - timedelta(days=data_sel.weekday())
-                if inicializar_semana_inteligente(data_inicio, tentar_copiar=True):
-                    st.cache_data.clear(); st.success("Semana criada (com cópia)!"); time.sleep(1.5); st.rerun()
-        with col_btn2:
-            if st.button("📄 Inicializar (Vazia)", help="Cria a semana totalmente em branco", use_container_width=True):
-                data_inicio = data_sel - timedelta(days=data_sel.weekday())
-                if inicializar_semana_inteligente(data_inicio, tentar_copiar=False):
-                    st.cache_data.clear(); st.success("Semana criada (vazia)!"); time.sleep(1.5); st.rerun()
+        # Botão Simplificado (Sem clonagem)
+        if st.button("✨ Inicializar Semana", type="primary", use_container_width=True):
+            data_inicio = data_sel - timedelta(days=data_sel.weekday())
+            if inicializar_semana_simples(data_inicio):
+                st.cache_data.clear(); st.success("Semana inicializada com sucesso!"); time.sleep(1.5); st.rerun()
 
     st.markdown("---")
     st.markdown("##### 📂 Histórico de Semanas")
     
-    # Grid de semanas
     if not df_semanas_todas.empty:
         for index, row in df_semanas_todas.iterrows():
             c1, c2, c3 = st.columns([4, 1, 1])
@@ -271,6 +229,8 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     else:
         st.info("Nenhuma semana criada.")
 
+# APLICANDO @st.fragment PARA EVITAR O PULO DE TELA
+@st.fragment
 def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("✏️ Editor de Escala (Grade)")
     
@@ -285,50 +245,33 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
         # Carregar dados
         df_escala = carregar_escala_semana_por_id(semana_info['id'])
         
-        # Prepara as datas da semana (colunas)
+        # Prepara as datas da semana
         data_ini = semana_info['data_inicio']
         datas_semana = [(data_ini + timedelta(days=i)) for i in range(7)]
         colunas_headers = [f"{DIAS_SEMANA_PT[d.weekday()]} ({d.strftime('%d/%m')})" for d in datas_semana]
         mapeamento_datas = {header: data for header, data in zip(colunas_headers, datas_semana)}
 
-        # ---- DASHBOARD DE COBERTURA ----
-        with st.expander("📊 Ver Cobertura (Dashboard)", expanded=True):
-            if not df_escala.empty:
-                # Conta quantos NÃO estão de Folga/Ferias/Vazio por dia
-                contagem_por_dia = {}
-                for dia_obj in datas_semana:
-                    # Filtra registros desse dia
-                    regs_dia = df_escala[pd.to_datetime(df_escala['data']).dt.date == dia_obj]
-                    # Conta quem tem horário preenchido e não é folga
-                    trabalhando = regs_dia[~regs_dia['horario'].isin(["", "Folga", "Ferias", "Atestado"])].shape[0]
-                    contagem_por_dia[DIAS_SEMANA_PT[dia_obj.weekday()]] = trabalhando
-                
-                st.bar_chart(contagem_por_dia, height=200)
-                st.caption("Número de colaboradores escalados (trabalhando) por dia.")
-
         # ---- EDITOR EM GRADE ----
-        # Pivotar dados: Linhas=Nomes, Colunas=Dias
         df_escala['dia_header'] = pd.to_datetime(df_escala['data']).apply(lambda x: f"{DIAS_SEMANA_PT[x.weekday()]} ({x.strftime('%d/%m')})")
         
-        # Garante que todos colaboradores apareçam, mesmo sem horário
+        # Pivot table
         df_full = df_escala.pivot_table(index='nome', columns='dia_header', values='horario', aggfunc='first')
         df_full = df_full.reindex(sorted(df_colaboradores['nome'].unique()))
-        
-        # Garante que todas colunas de dias apareçam na ordem certa
         df_full = df_full.reindex(columns=colunas_headers)
-        df_full = df_full.fillna("") # Remove NaNs
+        df_full = df_full.fillna("")
 
-        # Configuração das colunas para ter Dropdown
+        # Configuração das colunas
         column_config = {
             col: st.column_config.SelectboxColumn(
                 col,
                 options=HORARIOS_PADRAO,
                 required=False,
-                width="medium"
+                width="small"
             ) for col in colunas_headers
         }
 
-        st.markdown("### 📝 Grade de Horários")
+        st.markdown("### 📝 Escala de Horários")
+        
         df_editado = st.data_editor(
             df_full,
             column_config=column_config,
@@ -339,9 +282,11 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
 
         col_save, _ = st.columns([1, 4])
         with col_save:
-            if st.button("💾 Salvar Grade Completa", type="primary", use_container_width=True):
+            if st.button("💾 Salvar Escala Completa", type="primary", use_container_width=True):
                 if salvar_grade_massa(df_editado, mapeamento_datas):
-                    st.success("✅ Grade salva com sucesso!"); time.sleep(1); st.cache_data.clear(); st.rerun()
+                    st.success("✅ Grade salva!")
+                    time.sleep(1)
+                    st.rerun()
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.subheader("👥 Gerenciar Colaboradores")
@@ -382,7 +327,7 @@ def main():
         else:
             st.success(f"Olá, {st.session_state.nome_logado}")
             if st.button("Sair"): st.session_state.logado = False; st.rerun()
-        st.markdown("---"); st.caption("v3.0")
+        st.markdown("---"); st.caption("dev @Rogério Souza")
 
     if st.session_state.logado:
         t1, t2, t3, t4 = st.tabs(["Gerenciar Semanas", "Editar Grade", "Colaboradores", "Visão Pública"])
