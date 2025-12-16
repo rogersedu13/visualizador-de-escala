@@ -6,6 +6,7 @@ from datetime import timedelta, date
 from supabase import create_client, Client
 import time
 import base64
+import io
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -71,9 +72,6 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
 def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bool:
-    """
-    Salva a escala.
-    """
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
@@ -84,6 +82,59 @@ def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bo
             }).execute()
         return True
     except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
+
+def salvar_escala_via_csv(df_csv: pd.DataFrame, data_inicio_semana: date) -> bool:
+    """
+    Processa o DataFrame vindo do CSV e salva no banco.
+    """
+    try:
+        # Prepara datas esperadas para validar colunas
+        datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
+        
+        colunas_csv = df_csv.columns.tolist()
+        if 'Nome' not in colunas_csv:
+            st.error("O arquivo CSV precisa ter uma coluna chamada 'Nome'.")
+            return False
+        
+        barra = st.progress(0, text="Processando arquivo...")
+        total_linhas = len(df_csv)
+        
+        for index, row in df_csv.iterrows():
+            nome = row['Nome']
+            if pd.isna(nome) or str(nome).strip() == "": continue
+            
+            # Itera pelas 7 colunas de dias
+            for i in range(7):
+                data_str_header = datas_reais[i] # Ex: 25/09/2023
+                
+                # Tenta pegar pelo nome da coluna (mais seguro) ou pelo indice
+                horario = ""
+                if data_str_header in df_csv.columns:
+                    horario = row[data_str_header]
+                elif len(row) > i+1: # Fallback pelo indice
+                    horario = row.iloc[i+1]
+                
+                if pd.isna(horario): horario = ""
+                horario = str(horario).strip()
+                
+                # Data real para salvar no banco YYYY-MM-DD
+                data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
+                
+                supabase.rpc('save_escala_dia_final', {
+                    'p_nome': str(nome).strip(), 
+                    'p_data': data_banco, 
+                    'p_horario': horario
+                }).execute()
+            
+            if index % 5 == 0:
+                barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
+                
+        barra.empty()
+        return True
+
+    except Exception as e:
+        st.error(f"Erro ao processar CSV: {e}")
+        return False
 
 def inicializar_semana_simples(data_inicio: date) -> bool:
     try:
@@ -203,7 +254,6 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     else:
         st.info("Nenhuma semana criada.")
 
-# RETORNANDO A EDIÇÃO INDIVIDUAL (COM ST.FRAGMENT PARA NÃO MEXER A TELA)
 @st.fragment
 def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("✏️ Editar Escala")
@@ -211,7 +261,6 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
 
-    # Filtros lado a lado
     c1, c2 = st.columns(2)
     with c1:
         opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
@@ -224,22 +273,16 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
     st.markdown("---")
 
     if semana_info and colaborador:
-        # Carregar dados
         id_semana = semana_info['id']
         data_ini = semana_info['data_inicio']
         
-        # Busca escala atual
         df_full = carregar_escala_semana_por_id(id_semana)
-        
-        # Filtra para o colaborador
         escala_colab = pd.DataFrame()
         if not df_full.empty:
             escala_colab = df_full[df_full['nome'] == colaborador]
             
-        # Dicionário {data: horario} para preencher os selectboxes
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
 
-        # Renderiza os 7 dias
         st.markdown(f"**Editando:** `{colaborador}`")
         
         cols = st.columns(7)
@@ -251,15 +294,13 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
             
             horario_atual = horarios_atuais.get(dia_atual, "")
             
-            # Encontra o indice do horario atual na lista padrao
             try:
                 idx = HORARIOS_PADRAO.index(horario_atual)
             except ValueError:
-                idx = 0 # Se nao achar, padrao é vazio
+                idx = 0
             
             with cols[i]:
                 st.caption(dia_label)
-                # Chave unica para o widget não bugar
                 key_widget = f"sel_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val = st.selectbox("H", HORARIOS_PADRAO, index=idx, key=key_widget, label_visibility="collapsed")
                 horarios_novos.append(val)
@@ -269,7 +310,64 @@ def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas:
             if salvar_escala_individual(colaborador, horarios_novos, data_ini):
                 st.success(f"Escala de {colaborador} salva!")
                 time.sleep(1)
-                st.rerun() # Atualiza apenas este fragmento
+                st.rerun()
+
+def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
+    st.subheader("📤 Importar Escala via CSV")
+    
+    st.markdown("""
+    **Como usar:**
+    1. Selecione a semana abaixo.
+    2. Clique em **'📥 Baixar Modelo'** para pegar a planilha vazia.
+    3. Abra no Excel/Google Sheets, preencha os horários e **salve como CSV**.
+    4. Arraste o arquivo preenchido de volta aqui para salvar tudo de uma vez.
+    """)
+    
+    if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
+    
+    opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+    semana_str = st.selectbox("Selecione a semana para importar:", options=opcoes.keys(), key="sel_sem_imp")
+    semana_info = opcoes[semana_str]
+    
+    # Gerar Template
+    if semana_info:
+        data_ini = semana_info['data_inicio']
+        datas_header = [(data_ini + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
+        colunas_csv = ['Nome'] + datas_header
+        
+        # Cria DataFrame vazio com os nomes
+        df_template = pd.DataFrame(columns=colunas_csv)
+        if not df_colaboradores.empty:
+            df_template['Nome'] = sorted(df_colaboradores['nome'].unique())
+        
+        # Converte para CSV
+        csv = df_template.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📥 Baixar Modelo da Semana (CSV)",
+            data=csv,
+            file_name=f"modelo_escala_{data_ini.strftime('%d-%m')}.csv",
+            mime='text/csv',
+            type="secondary"
+        )
+        
+        st.markdown("---")
+        
+        arquivo_upload = st.file_uploader("Arraste o arquivo CSV preenchido aqui:", type=["csv"])
+        
+        if arquivo_upload is not None:
+            try:
+                df_upload = pd.read_csv(arquivo_upload)
+                st.info(f"Arquivo carregado com {len(df_upload)} linhas. Clique abaixo para salvar.")
+                st.dataframe(df_upload.head(3), use_container_width=True)
+                
+                if st.button("🚀 Processar e Salvar Escala Completa", type="primary"):
+                    if salvar_escala_via_csv(df_upload, data_ini):
+                        st.success("Importação concluída com sucesso! Verifique na aba de edição ou consulta.")
+                        time.sleep(2)
+                        st.cache_data.clear()
+            except Exception as e:
+                st.error(f"Erro ao ler arquivo: {e}")
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.subheader("👥 Gerenciar Colaboradores")
@@ -313,11 +411,13 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4 = st.tabs(["Gerenciar Semanas", "Editar Escala", "Colaboradores", "Visão Pública"])
+        # TABS Atualizadas
+        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar (Manual)", "Importar CSV", "Colaboradores", "Visão Pública"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_semanal(df_colaboradores, df_semanas_ativas)
-        with t3: aba_gerenciar_colaboradores(df_colaboradores)
-        with t4: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
+        with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas) # Nova Aba
+        with t4: aba_gerenciar_colaboradores(df_colaboradores)
+        with t5: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
     else:
         aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
