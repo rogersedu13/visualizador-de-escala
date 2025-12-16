@@ -18,7 +18,7 @@ HORARIOS_PADRAO = [
 ]
 
 # --- Configuração da Página do Streamlit ---
-st.set_page_config(page_title="Escala Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
 
 # --- Conexão com o Banco de Dados Supabase ---
 try:
@@ -70,48 +70,25 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
-def salvar_grade_massa(df_edited: pd.DataFrame, mapeamento_datas: dict) -> bool:
+def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bool:
     """
-    Função otimizada para salvar a grade inteira.
+    Salva a escala.
     """
     try:
-        # Converter a grade de volta para formato de banco de dados (melt)
-        df_melted = df_edited.reset_index().melt(id_vars='nome', var_name='coluna_dia', value_name='horario')
-        
-        total_ops = len(df_melted)
-        barra_progresso = st.progress(0, text="Salvando alterações...")
-        
-        for i, row in df_melted.iterrows():
-            nome = row['nome']
-            coluna = row['coluna_dia']
-            horario = row['horario']
-            data_real = mapeamento_datas.get(coluna)
-            
-            if data_real:
-                supabase.rpc('save_escala_dia_final', {
-                    'p_nome': nome.strip(), 
-                    'p_data': data_real.strftime('%Y-%m-%d'), 
-                    'p_horario': horario if horario else ""
-                }).execute()
-            
-            if i % 5 == 0:
-                barra_progresso.progress((i + 1) / total_ops, text=f"Salvando {i+1}/{total_ops}...")
-        
-        barra_progresso.empty()
+        for i, horario in enumerate(horarios):
+            data_dia = data_inicio + timedelta(days=i)
+            supabase.rpc('save_escala_dia_final', {
+                'p_nome': nome.strip(), 
+                'p_data': data_dia.strftime('%Y-%m-%d'), 
+                'p_horario': horario
+            }).execute()
         return True
-    except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
-        return False
+    except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
 
 def inicializar_semana_simples(data_inicio: date) -> bool:
-    """
-    Inicializa a semana sempre em branco
-    """
     try:
-        # 1. Cria a semana na tabela 'semanas'
         supabase.rpc('inicializar_escala_semanal', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
         
-        # 2. Inicializa vazio para todos os colaboradores para garantir que apareçam na grade
         df_colabs = carregar_colaboradores()
         if not df_colabs.empty:
             for nome in df_colabs['nome']:
@@ -143,7 +120,6 @@ def remover_colaboradores(lista_nomes: list) -> bool:
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
-    # Fiscais Hardcoded (Sem banco de dados)
     return pd.DataFrame([{"codigo": 1017, "nome": "Rogério", "senha": "1"}, {"codigo": 1002, "nome": "Andrews", "senha": "2"}])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
@@ -200,11 +176,9 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     with st.container(border=True):
         st.markdown("##### ➕ Inicializar Nova Semana")
         hoje = date.today()
-        # Calcula a próxima segunda-feira padrão
         prox_segunda = hoje + timedelta(days=(7 - hoje.weekday()))
         data_sel = st.date_input("Início da Semana (Segunda-feira):", value=prox_segunda)
         
-        # Botão Simplificado (Sem clonagem)
         if st.button("✨ Inicializar Semana", type="primary", use_container_width=True):
             data_inicio = data_sel - timedelta(days=data_sel.weekday())
             if inicializar_semana_simples(data_inicio):
@@ -229,64 +203,73 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     else:
         st.info("Nenhuma semana criada.")
 
-# APLICANDO @st.fragment PARA EVITAR O PULO DE TELA
+# RETORNANDO A EDIÇÃO INDIVIDUAL (COM ST.FRAGMENT PARA NÃO MEXER A TELA)
 @st.fragment
 def aba_editar_escala_semanal(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
-    st.subheader("✏️ Editor de Escala (Grade)")
+    st.subheader("✏️ Editar Escala")
     
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
 
-    opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
-    semana_str = st.selectbox("Selecione a semana:", options=opcoes.keys())
-    semana_info = opcoes[semana_str]
+    # Filtros lado a lado
+    c1, c2 = st.columns(2)
+    with c1:
+        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        semana_str = st.selectbox("Selecione a semana:", options=opcoes.keys())
+        semana_info = opcoes[semana_str]
+    with c2:
+        nomes = sorted(df_colaboradores['nome'].unique())
+        colaborador = st.selectbox("Selecione o colaborador:", nomes)
 
-    if semana_info:
+    st.markdown("---")
+
+    if semana_info and colaborador:
         # Carregar dados
-        df_escala = carregar_escala_semana_por_id(semana_info['id'])
-        
-        # Prepara as datas da semana
+        id_semana = semana_info['id']
         data_ini = semana_info['data_inicio']
-        datas_semana = [(data_ini + timedelta(days=i)) for i in range(7)]
-        colunas_headers = [f"{DIAS_SEMANA_PT[d.weekday()]} ({d.strftime('%d/%m')})" for d in datas_semana]
-        mapeamento_datas = {header: data for header, data in zip(colunas_headers, datas_semana)}
-
-        # ---- EDITOR EM GRADE ----
-        df_escala['dia_header'] = pd.to_datetime(df_escala['data']).apply(lambda x: f"{DIAS_SEMANA_PT[x.weekday()]} ({x.strftime('%d/%m')})")
         
-        # Pivot table
-        df_full = df_escala.pivot_table(index='nome', columns='dia_header', values='horario', aggfunc='first')
-        df_full = df_full.reindex(sorted(df_colaboradores['nome'].unique()))
-        df_full = df_full.reindex(columns=colunas_headers)
-        df_full = df_full.fillna("")
-
-        # Configuração das colunas
-        column_config = {
-            col: st.column_config.SelectboxColumn(
-                col,
-                options=HORARIOS_PADRAO,
-                required=False,
-                width="small"
-            ) for col in colunas_headers
-        }
-
-        st.markdown("### 📝 Escala de Horários")
+        # Busca escala atual
+        df_full = carregar_escala_semana_por_id(id_semana)
         
-        df_editado = st.data_editor(
-            df_full,
-            column_config=column_config,
-            use_container_width=True,
-            height=600,
-            key=f"editor_{semana_info['id']}"
-        )
+        # Filtra para o colaborador
+        escala_colab = pd.DataFrame()
+        if not df_full.empty:
+            escala_colab = df_full[df_full['nome'] == colaborador]
+            
+        # Dicionário {data: horario} para preencher os selectboxes
+        horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
 
-        col_save, _ = st.columns([1, 4])
-        with col_save:
-            if st.button("💾 Salvar Escala Completa", type="primary", use_container_width=True):
-                if salvar_grade_massa(df_editado, mapeamento_datas):
-                    st.success("✅ Grade salva!")
-                    time.sleep(1)
-                    st.rerun()
+        # Renderiza os 7 dias
+        st.markdown(f"**Editando:** `{colaborador}`")
+        
+        cols = st.columns(7)
+        horarios_novos = []
+        
+        for i in range(7):
+            dia_atual = data_ini + timedelta(days=i)
+            dia_label = f"{DIAS_SEMANA_PT[i]}\n({dia_atual.strftime('%d/%m')})"
+            
+            horario_atual = horarios_atuais.get(dia_atual, "")
+            
+            # Encontra o indice do horario atual na lista padrao
+            try:
+                idx = HORARIOS_PADRAO.index(horario_atual)
+            except ValueError:
+                idx = 0 # Se nao achar, padrao é vazio
+            
+            with cols[i]:
+                st.caption(dia_label)
+                # Chave unica para o widget não bugar
+                key_widget = f"sel_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
+                val = st.selectbox("H", HORARIOS_PADRAO, index=idx, key=key_widget, label_visibility="collapsed")
+                horarios_novos.append(val)
+        
+        st.markdown("")
+        if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+            if salvar_escala_individual(colaborador, horarios_novos, data_ini):
+                st.success(f"Escala de {colaborador} salva!")
+                time.sleep(1)
+                st.rerun() # Atualiza apenas este fragmento
 
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.subheader("👥 Gerenciar Colaboradores")
@@ -327,10 +310,10 @@ def main():
         else:
             st.success(f"Olá, {st.session_state.nome_logado}")
             if st.button("Sair"): st.session_state.logado = False; st.rerun()
-        st.markdown("---"); st.caption("dev @Rogério Souza")
+        st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4 = st.tabs(["Gerenciar Semanas", "Editar Grade", "Colaboradores", "Visão Pública"])
+        t1, t2, t3, t4 = st.tabs(["Gerenciar Semanas", "Editar Escala", "Colaboradores", "Visão Pública"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_semanal(df_colaboradores, df_semanas_ativas)
         with t3: aba_gerenciar_colaboradores(df_colaboradores)
