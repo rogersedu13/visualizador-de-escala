@@ -281,12 +281,12 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
-    st.subheader("📤 Importar Escala via Excel (Com Seleção)")
+    st.subheader("📤 Importar Escala.")
     
     st.markdown("""
     **Como usar:**
     1. Selecione a semana abaixo e clique em **'📥 Baixar Planilha Excel'**.
-    2. O arquivo baixado terá **caixas de seleção (setinhas)** com os horários corretos.
+    2. O arquivo baixado com os horários corretos será baixado.
     3. Abra no Excel, selecione os horários e salve.
     4. Arraste o arquivo Excel (.xlsx) preenchido de volta aqui.
     """)
@@ -412,7 +412,7 @@ def main():
 
     if st.session_state.logado:
         # TABS Atualizadas - Note "Importar Excel"
-        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar (Manual)", "Importar Excel", "Colaboradores", "Visão Pública"])
+        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar (Manual)", "Importar Excel", "Colaboradores", "Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
         with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas) # Nova Aba Excel
