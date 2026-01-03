@@ -32,21 +32,24 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# --- LÓGICA DE CORTE MANHÃ / TARDE (AJUSTADA) ---
+# --- LÓGICA DE CORTE MANHÃ / TARDE (AJUSTADA: 9:30 e 10:00 contam nos dois) ---
 def calcular_minutos(horario_str):
     """Converte '9:30 HRS' em minutos (ex: 570) para comparação precisa."""
     if "HRS" not in horario_str: return -1
     try:
-        # Pega a parte da hora "9:30"
         time_part = horario_str.split(' ')[0]
         h, m = map(int, time_part.split(':'))
         return h * 60 + m
     except:
         return -1
 
-# Definindo o ponto de corte: 9:30 (9*60 + 30 = 570 minutos)
-# Quem for menor que 570 minutos é MANHÃ. Quem for >= 570 é TARDE.
-HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) < 570]
+# 9:30 = 570 minutos
+# 10:00 = 600 minutos
+
+# Manhã: Tudo que for menor ou igual a 10:00 (Inclui 9:30 e 10:00)
+HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
+
+# Tarde: Tudo que for maior ou igual a 09:30 (Inclui 9:30 e 10:00)
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
@@ -461,7 +464,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet = writer.sheets['Escala']
 
                     # --- CORREÇÃO DE VISUAL ---
-                    # Esconde as linhas de grade (grids) para o Excel ficar limpo
+                    # Esconde as linhas de grade do Excel (deixa fundo branco)
                     worksheet.hide_gridlines(2)
                     
                     # FORMATOS
@@ -485,7 +488,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
-                    worksheet.set_column(0, 0, 30, fmt_nome)
+                    
+                    # CORREÇÃO DA BORDA INFINITA: Usamos None no formato da coluna (só largura)
+                    worksheet.set_column(0, 0, 30, None)
                     
                     col_idx = 1
                     last_data_row = len(df_template) # Ex: 10 nomes
@@ -519,7 +524,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        worksheet.set_column(col_idx, col_idx, 12, fmt_grid)
+                        # CORREÇÃO BORDA INFINITA: None no formato
+                        worksheet.set_column(col_idx, col_idx, 12, None)
+                        
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         
                         for h in H_VERMELHO: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_vermelho})
@@ -532,7 +539,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            worksheet.set_column(col_idx, col_idx, 5, fmt_grid)
+                            # CORREÇÃO BORDA INFINITA
+                            worksheet.set_column(col_idx, col_idx, 5, None)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
@@ -557,12 +565,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
-                        # Usando as listas ajustadas (9:30 já é tarde)
+                        # Usando as listas ajustadas (9:30 e 10:00 contam nos dois)
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
                         
-                        # Escreve a fórmula SOMA(CONT.SE(...))
-                        # Se as listas estiverem vazias (ex: nenhum horário cadastrado), trata o erro
                         if crit_m:
                             worksheet.write_formula(row_total_m, current_col, f"=SUM({crit_m})", fmt_manha)
                         else:
