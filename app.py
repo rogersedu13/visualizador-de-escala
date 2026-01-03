@@ -136,10 +136,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
                 # Pega caixa (Lógica Inteligente: Pega a coluna IMEDIATAMENTE APÓS a data)
                 caixa = None
                 try:
-                    # Encontra o índice da coluna de data
                     col_idx = df_excel.columns.get_loc(data_str_header)
-                    # O caixa está na coluna seguinte (+1)
-                    # Verifica se existe coluna seguinte e se ela tem valor
                     if col_idx + 1 < len(df_excel.columns):
                         val_caixa = row.iloc[col_idx + 1]
                         if not pd.isna(val_caixa):
@@ -169,7 +166,6 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    # Envia caixa como NULL ao inicializar
                     supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
@@ -213,7 +209,6 @@ def carregar_fiscais() -> pd.DataFrame:
     ])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
-    # Ajuste de layout CSS para centralizar e remover espaço branco
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
     <!DOCTYPE html>
@@ -419,10 +414,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
-                # Se for Operador, adiciona coluna de caixa ao lado do dia
                 if funcao_selecionada == "Operador(a) de Caixa":
-                    # Coluna de caixa agora chama-se apenas "CX" visualmente, mas precisamos de espaço no DF
-                    colunas.append(f"CX_REF_{d_str}") # Nome interno temporário
+                    # Nome interno temporário para o DF
+                    colunas.append(f"CX_REF_{d_str}")
 
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
@@ -442,28 +436,30 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA'})
                     fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0'})
                     
-                    # Escreve abas ocultas para validação
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # --- SOBRESCREVENDO CABEÇALHOS COM CORES E NOMES LIMPOS ---
+                    # --- SOBRESCREVENDO CABEÇALHOS E AJUSTANDO LARGURAS ---
+                    
                     # Coluna Nome (A1)
                     worksheet.write(0, 0, "Nome", fmt_bold)
+                    worksheet.set_column(0, 0, 30) # Largura fixa Nome
                     
                     col_idx = 1
                     for i in range(7):
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
-                        # Escreve DATA (Azul)
+                        
+                        # Coluna DATA (Azul)
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        # Validação Horário
+                        worksheet.set_column(col_idx, col_idx, 12) # ~2.34cm
                         worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         col_idx += 1
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
-                            # Escreve CAIXA (Amarelo) - Nome apenas "CX"
+                            # Coluna CAIXA (Amarelo)
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            # Validação Caixa
+                            worksheet.set_column(col_idx, col_idx, 5) # ~1.50cm
                             worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
@@ -475,8 +471,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.write(row_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    # Fórmulas
-                    # Se for operador, pula de 2 em 2. Se não, de 1 em 1.
                     step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
                     
                     def num_to_col(n):
@@ -486,8 +480,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             n = n // 26 - 1
                         return s
 
-                    # Loop apenas nas colunas de DATA para somar horários
-                    # Total de colunas geradas no DF (sem contar Nome)
                     total_data_cols = 7
                     current_col = 1
                     
@@ -498,9 +490,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
                         worksheet.write_formula(row_m, current_col, f"=SUM({crit_m})", fmt_manha)
                         worksheet.write_formula(row_t, current_col, f"=SUM({crit_t})", fmt_tarde)
-                        current_col += step # Pula para a próxima coluna de data
+                        current_col += step
 
-                    worksheet.set_column('A:A', 30)
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
 
             st.download_button(label=f"📥 Baixar Planilha - {funcao_selecionada}", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
