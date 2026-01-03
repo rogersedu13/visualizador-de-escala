@@ -114,6 +114,10 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
 def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) -> bool:
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
+        colunas_excel = df_excel.columns.tolist()
+        if 'Nome' not in colunas_excel:
+            st.error("O arquivo Excel precisa ter uma coluna chamada 'Nome'.")
+            return False
         
         barra = st.progress(0, text="Processando arquivo...")
         total_linhas = len(df_excel)
@@ -202,17 +206,91 @@ def carregar_fiscais() -> pd.DataFrame:
     ])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
-    tabela_html = df_escala.to_html(index=False, border=1, justify="center")
+    # Ajuste de layout CSS para centralizar e remover espaço branco
+    tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
+    
     return f"""
-    <html><head><title>Escala {nome_colaborador}</title><meta charset="UTF-8"><style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; }} h1, h2 {{ text-align: center; color: #333; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-        th, td {{ padding: 10px; text-align: center; border: 1px solid #ddd; }}
-        thead {{ background-color: #f2f2f2; }} tr:nth-child(even) {{ background-color: #f9f9f9; }}
-    </style></head><body>
-        <h1>Escala Semanal</h1><h2>{nome_colaborador} - {semana_str}</h2>
-        {tabela_html}
-    </body></html>
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Escala {nome_colaborador}</title>
+        <style>
+            body {{
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                background-color: #f4f4f4;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: flex-start; /* Alinha no topo para impressão */
+                min-height: 100vh;
+            }}
+            .container {{
+                background-color: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 700px; /* Limita a largura para não esticar */
+                text-align: center;
+            }}
+            h1 {{
+                color: #2c3e50;
+                font-size: 24px;
+                margin-bottom: 5px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }}
+            h2 {{
+                color: #7f8c8d;
+                font-size: 16px;
+                margin-top: 0;
+                margin-bottom: 25px;
+                font-weight: normal;
+            }}
+            table.tabela-escala {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }}
+            table.tabela-escala th {{
+                background-color: #34495e;
+                color: white;
+                padding: 12px;
+                text-transform: uppercase;
+                font-size: 12px;
+                letter-spacing: 1px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }}
+            table.tabela-escala td {{
+                padding: 12px;
+                border-bottom: 1px solid #eee;
+                color: #333;
+                font-size: 14px;
+            }}
+            table.tabela-escala tr:last-child td {{
+                border-bottom: none;
+            }}
+            table.tabela-escala tr:nth-child(even) {{
+                background-color: #f9f9f9;
+            }}
+            /* Ajuste para impressão */
+            @media print {{
+                body {{ background-color: white; }}
+                .container {{ box-shadow: none; border: 1px solid #ddd; max-width: 100%; width: 100%; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Escala Semanal</h1>
+            <h2>{nome_colaborador} <br> {semana_str}</h2>
+            {tabela_html}
+        </div>
+    </body>
+    </html>
     """
 
 # --- ABAS ---
