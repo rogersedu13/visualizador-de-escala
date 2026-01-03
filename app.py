@@ -10,6 +10,7 @@ import io
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+DIAS_SEMANA_FULL = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
 
 FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Recepção"]
 
@@ -21,8 +22,8 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# Lista de Caixas (1 a 17 + Self)
-LISTA_CAIXAS = ["", "Self"] + [str(i) for i in range(1, 18)]
+# Lista de Caixas (Atualizada com "---")
+LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
 # Definição de Manhã e Tarde para Excel (Cálculo interno)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
@@ -114,10 +115,6 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
 def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) -> bool:
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
-        colunas_excel = df_excel.columns.tolist()
-        if 'Nome' not in colunas_excel:
-            st.error("O arquivo Excel precisa ter uma coluna chamada 'Nome'.")
-            return False
         
         barra = st.progress(0, text="Processando arquivo...")
         total_linhas = len(df_excel)
@@ -223,7 +220,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
                 padding: 20px;
                 display: flex;
                 justify-content: center;
-                align-items: flex-start; /* Alinha no topo para impressão */
+                align-items: flex-start;
                 min-height: 100vh;
             }}
             .container {{
@@ -232,7 +229,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
                 border-radius: 8px;
                 box-shadow: 0 4px 10px rgba(0,0,0,0.1);
                 width: 100%;
-                max-width: 700px; /* Limita a largura para não esticar */
+                max-width: 700px;
                 text-align: center;
             }}
             h1 {{
@@ -276,7 +273,6 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
             table.tabela-escala tr:nth-child(even) {{
                 background-color: #f9f9f9;
             }}
-            /* Ajuste para impressão */
             @media print {{
                 body {{ background-color: white; }}
                 .container {{ box-shadow: none; border: 1px solid #ddd; max-width: 100%; width: 100%; }}
@@ -422,7 +418,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if pd.isna(caixa_atual): caixa_atual = ""
             
             idx_h = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
-            idx_c = LISTA_CAIXAS.index(caixa_atual) if caixa_atual in LISTA_CAIXAS else 0
             
             with cols[i]:
                 st.caption(dia_label)
@@ -434,8 +429,18 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 # Selectbox Caixa (apenas se for operador)
                 val_c = None
                 if is_operador:
-                    key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
-                    val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=key_c, label_visibility="collapsed")
+                    # LÓGICA INTELIGENTE: Se for folga, trava em "---"
+                    if val_h in ["Folga", "Ferias", "Atestado", "Afastado(a)"]:
+                        # Mostra visualmente que está "anulado"
+                        st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
+                        val_c = "---"
+                    else:
+                        # Se estiver trabalhando, mostra o selectbox normal
+                        key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
+                        # Garante que o índice existe na lista nova
+                        idx_c = LISTA_CAIXAS.index(caixa_atual) if caixa_atual in LISTA_CAIXAS else 0
+                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=key_c, label_visibility="collapsed")
+                
                 novos_caixas.append(val_c)
         
         st.markdown("")
