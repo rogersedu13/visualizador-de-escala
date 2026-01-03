@@ -60,12 +60,7 @@ def carregar_colaboradores() -> pd.DataFrame:
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
         return df
     except Exception as e: 
-        # Fallback
-        try:
-            data = supabase.rpc('get_colaboradores').execute().data
-            return pd.DataFrame(data)
-        except:
-            return pd.DataFrame()
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
@@ -98,7 +93,12 @@ def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bo
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
-            supabase.rpc('save_escala_dia_final', {'p_nome': nome.strip(), 'p_data': data_dia.strftime('%Y-%m-%d'), 'p_horario': horario}).execute()
+            # Usa RPC recriada no SQL
+            supabase.rpc('save_escala_dia_final', {
+                'p_nome': nome.strip(), 
+                'p_data': data_dia.strftime('%Y-%m-%d'), 
+                'p_horario': horario
+            }).execute()
         return True
     except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
 
@@ -154,10 +154,14 @@ def arquivar_reativar_semana(id_semana: int, novo_status: bool):
     except Exception as e: st.error(f"Erro: {e}"); return False
 
 def adicionar_colaborador(nome: str, funcao: str) -> bool:
+    """Função reescrita para inserção direta, mais garantida."""
     try:
-        supabase.rpc('add_colaborador', {'p_nome': nome.strip(), 'p_funcao': funcao}).execute()
+        # Inserção direta na tabela
+        supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao}).execute()
         return True
-    except Exception as e: st.error(f"Erro ao adicionar: {e}"); return False
+    except Exception as e: 
+        st.error(f"Erro ao adicionar (Verifique se o nome já existe): {e}")
+        return False
 
 def remover_colaboradores(lista_nomes: list) -> bool:
     try:
@@ -165,11 +169,8 @@ def remover_colaboradores(lista_nomes: list) -> bool:
     except Exception as e: st.error(f"Erro: {e}"); return False
 
 def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
-    """
-    Atualiza a função usando a procedure segura do SQL.
-    """
     try:
-        supabase.rpc('update_colaborador_funcao', {'p_nome': nome.strip(), 'p_nova_funcao': nova_funcao}).execute()
+        supabase.table('colaboradores').update({'funcao': nova_funcao}).eq('nome', nome).execute()
         return True
     except Exception as e: 
         st.error(f"Erro ao atualizar função de {nome}: {e}")
@@ -177,7 +178,7 @@ def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
-    # --- LISTA DE FISCAIS ATUALIZADA ---
+    # --- LISTA DE FISCAIS ---
     return pd.DataFrame([
         {"codigo": 1017, "nome": "Rogério", "senha": "1"},
         {"codigo": 1002, "nome": "Andrews", "senha": "2"},
@@ -200,7 +201,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     </body></html>
     """
 
-# --- ABAS COM ST.FRAGMENT (ESTABILIDADE TOTAL) ---
+# --- ABAS COM ST.FRAGMENT ---
 
 @st.fragment
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -377,7 +378,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini):
                         st.success("Importado!"); time.sleep(2); st.cache_data.clear()
 
-# --- ABA DE COLABORADORES COM ST.FRAGMENT (CORRIGIDA E MAIS ROBUSTA) ---
 @st.fragment
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.subheader("👥 Gerenciar Colaboradores")
@@ -386,7 +386,6 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.info("Aqui você pode mudar o cargo de quem já está cadastrado.")
     
     if not df_colaboradores.empty:
-        # Prepara um dicionário para busca rápida (Nome -> Função Atual)
         mapa_original = {row['nome']: row['funcao'] for _, row in df_colaboradores.iterrows()}
         
         df_editor = df_colaboradores.copy()
@@ -396,7 +395,6 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium")
         }
         
-        # EDITOR DE DADOS
         df_editado = st.data_editor(
             df_editor[['nome', 'funcao']], 
             column_config=col_config, 
@@ -413,11 +411,8 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             for index, row in df_editado.iterrows():
                 nome = row['nome']
                 nova_funcao = row['funcao']
-                
-                # Compara com o valor original que carregamos do banco
                 funcao_antiga = mapa_original.get(nome, "")
                 
-                # Se mudou, atualiza no banco
                 if nova_funcao != funcao_antiga:
                     atualizar_funcao_colaborador(nome, nova_funcao)
                     contador_updates += 1
@@ -425,14 +420,9 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                 if index % 5 == 0: barra.progress((index+1)/total)
             
             barra.empty()
-            if contador_updates > 0:
-                st.success(f"{contador_updates} cargos atualizados com sucesso!")
-            else:
-                st.info("Nenhuma alteração detectada para salvar.")
-                
-            time.sleep(1)
-            st.cache_data.clear()
-            st.rerun()
+            if contador_updates > 0: st.success(f"{contador_updates} cargos atualizados!")
+            else: st.info("Nenhuma alteração.")
+            time.sleep(1); st.cache_data.clear(); st.rerun()
     else:
         st.info("Sem colaboradores cadastrados.")
 
