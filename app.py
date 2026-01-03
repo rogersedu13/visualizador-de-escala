@@ -459,27 +459,32 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # Coluna Nome (A1) - Com borda e alinhada a esquerda (padrão nomes) ou centro
-                    # Optei por esquerda para nomes por estética, mas com borda
+                    # Coluna Nome (A1)
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     worksheet.set_column(0, 0, 30, fmt_nome)
                     
                     col_idx = 1
-                    last_data_row = len(df_template) + 100
+                    mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
+                    nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
+                    
+                    # Definindo onde terminam os dados e começam os totais
+                    last_data_row = len(df_template) # Ex: se tem 10 funcionarios, last_row = 10 (indices 1..10)
+                    row_total_m = last_data_row + 1 # Linha do Total Manhã
+                    row_total_t = last_data_row + 2 # Linha do Total Tarde
                     
                     # Loop para configurar cabeçalhos e validações
                     for i in range(7):
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
-                        # --- COLUNA DATA (Aplicar Cores Aqui) ---
+                        # --- COLUNA DATA ---
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        # Aplica formato de borda e centro na coluna toda
                         worksheet.set_column(col_idx, col_idx, 12, fmt_grid)
                         
+                        # Validação apenas nas linhas de DADOS (não nos totais)
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         
-                        # Aplica Formatação Condicional na coluna de Horário
+                        # Cores Condicionais (apenas dados)
                         # Vermelho
                         for h in H_VERMELHO:
                             worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_vermelho})
@@ -500,18 +505,15 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            # Aplica formato de borda e centro na coluna toda
                             worksheet.set_column(col_idx, col_idx, 5, fmt_grid)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
                     # --- TOTAIS ---
-                    mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
-                    nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
-                    row_m = len(df_template) + 2; row_t = len(df_template) + 3
-                    worksheet.write(row_m, 0, f"{nome_cargo} Manhã", fmt_manha)
-                    worksheet.write(row_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
+                    # Escreve os rótulos "Total Manhã" e "Total Tarde"
+                    worksheet.write(row_total_m, 0, f"{nome_cargo} Manhã", fmt_manha)
+                    worksheet.write(row_total_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
                     step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
                     
@@ -527,11 +529,21 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     
                     for i in range(total_data_cols):
                         letra = num_to_col(current_col)
-                        rng = f"{letra}2:{letra}{len(df_template)+1}"
+                        # Intervalo de dados para o COUNTIF: da linha 2 até a ultima linha de dados
+                        rng = f"{letra}2:{letra}{last_data_row+1}"
+                        
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
-                        worksheet.write_formula(row_m, current_col, f"=SUM({crit_m})", fmt_manha)
-                        worksheet.write_formula(row_t, current_col, f"=SUM({crit_t})", fmt_tarde)
+                        
+                        worksheet.write_formula(row_total_m, current_col, f"=SUM({crit_m})", fmt_manha)
+                        worksheet.write_formula(row_total_t, current_col, f"=SUM({crit_t})", fmt_tarde)
+                        
+                        # Se tiver coluna de caixa, a célula do total abaixo dela deve ficar em branco mas com borda (ou sem borda, depende do gosto).
+                        # Aqui vou deixar em branco para não poluir, mas se quiser borda, descomente:
+                        if step == 2:
+                             worksheet.write(row_total_m, current_col+1, "", fmt_manha)
+                             worksheet.write(row_total_t, current_col+1, "", fmt_tarde)
+
                         current_col += step
 
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
