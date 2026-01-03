@@ -32,7 +32,7 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 # Lista de Caixas (Atualizada com "---")
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# Definição de Manhã e Tarde para Excel (Cálculo interno dos totais)
+# Definição de Manhã e Tarde para Excel (Cálculo interno)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) > 10]
 
@@ -416,11 +416,13 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
         else:
+            # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
                 if funcao_selecionada == "Operador(a) de Caixa":
+                    # Nome interno temporário para o DF
                     colunas.append(f"CX_REF_{d_str}")
 
             df_template = pd.DataFrame(columns=colunas)
@@ -438,15 +440,16 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) 
                     fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})
                     
-                    fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA'})
-                    fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0'})
+                    fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0', 'align': 'center', 'valign': 'vcenter'})
                     
-                    # --- FORMATOS DE CORES CONDICIONAIS ---
-                    fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
-                    fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100'})
-                    fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082'}) # Lavanda / Indigo
-                    fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000'})
-                    fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700'})
+                    # --- FORMATOS DE CORES CONDICIONAIS + ALINHAMENTO ---
+                    fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter'})
+                    fmt_center   = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
@@ -464,7 +467,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         # --- COLUNA DATA (Aplicar Cores Aqui) ---
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        worksheet.set_column(col_idx, col_idx, 12)
+                        # Aplica formato centralizado e largura na coluna inteira
+                        worksheet.set_column(col_idx, col_idx, 12, fmt_center)
+                        
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         
                         # Aplica Formatação Condicional na coluna de Horário
@@ -488,7 +493,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            worksheet.set_column(col_idx, col_idx, 5)
+                            # Aplica formato centralizado e largura na coluna inteira
+                            worksheet.set_column(col_idx, col_idx, 5, fmt_center)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
