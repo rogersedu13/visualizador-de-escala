@@ -22,10 +22,17 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
+# Grupos de Cores para o Excel
+H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
+H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
+H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
+H_CINZA    = ["Folga"]
+H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
+
 # Lista de Caixas (Atualizada com "---")
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# Definição de Manhã e Tarde para Excel (Cálculo interno)
+# Definição de Manhã e Tarde para Excel (Cálculo interno dos totais)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) > 10]
 
@@ -409,13 +416,11 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
         else:
-            # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
                 if funcao_selecionada == "Operador(a) de Caixa":
-                    # Nome interno temporário para o DF
                     colunas.append(f"CX_REF_{d_str}")
 
             df_template = pd.DataFrame(columns=colunas)
@@ -428,39 +433,63 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     workbook = writer.book
                     worksheet = writer.sheets['Escala']
                     
-                    # FORMATOS DE CORES
+                    # FORMATOS
                     fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3', 'border': 1})
-                    fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) # Azul claro
-                    fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})   # Amarelo claro
+                    fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) 
+                    fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})
                     
                     fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA'})
                     fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0'})
                     
+                    # --- FORMATOS DE CORES CONDICIONAIS ---
+                    fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
+                    fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100'})
+                    fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082'}) # Lavanda / Indigo
+                    fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000'})
+                    fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700'})
+
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # --- SOBRESCREVENDO CABEÇALHOS E AJUSTANDO LARGURAS ---
-                    
-                    # Coluna Nome (A1)
                     worksheet.write(0, 0, "Nome", fmt_bold)
-                    worksheet.set_column(0, 0, 30) # Largura fixa Nome
+                    worksheet.set_column(0, 0, 30)
                     
                     col_idx = 1
+                    last_data_row = len(df_template) + 100
+                    
+                    # Loop para configurar cabeçalhos e validações
                     for i in range(7):
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
-                        # Coluna DATA (Azul)
+                        # --- COLUNA DATA (Aplicar Cores Aqui) ---
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        worksheet.set_column(col_idx, col_idx, 12) # ~2.34cm
-                        worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                        worksheet.set_column(col_idx, col_idx, 12)
+                        worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                        
+                        # Aplica Formatação Condicional na coluna de Horário
+                        # Vermelho
+                        for h in H_VERMELHO:
+                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_vermelho})
+                        # Verde
+                        for h in H_VERDE:
+                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_verde})
+                        # Roxo
+                        for h in H_ROXO:
+                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_roxo})
+                        # Cinza
+                        for h in H_CINZA:
+                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_cinza})
+                        # Amarelo
+                        for h in H_AMARELO:
+                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_amarelo})
+
                         col_idx += 1
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
-                            # Coluna CAIXA (Amarelo)
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            worksheet.set_column(col_idx, col_idx, 5) # ~1.50cm
-                            worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
+                            worksheet.set_column(col_idx, col_idx, 5)
+                            worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
                     # --- TOTAIS ---
