@@ -32,7 +32,7 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# --- LÓGICA DE CORTE MANHÃ / TARDE (AJUSTADA: 9:30 e 10:00 contam nos dois) ---
+# --- LÓGICA DE CORTE MANHÃ / TARDE ---
 def calcular_minutos(horario_str):
     """Converte '9:30 HRS' em minutos (ex: 570) para comparação precisa."""
     if "HRS" not in horario_str: return -1
@@ -43,12 +43,8 @@ def calcular_minutos(horario_str):
     except:
         return -1
 
-# 9:30 = 570 minutos
-# 10:00 = 600 minutos
-
 # Manhã: Tudo que for menor ou igual a 10:00 (Inclui 9:30 e 10:00)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
-
 # Tarde: Tudo que for maior ou igual a 09:30 (Inclui 9:30 e 10:00)
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
@@ -117,22 +113,24 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
-def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inicio: date) -> bool:
+def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inicio: date, id_semana: int) -> bool:
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
             cx = caixas[i] if caixas and i < len(caixas) else None
             
+            # ATUALIZADO: Passando p_semana_id
             supabase.rpc('save_escala_dia_final', {
                 'p_nome': nome.strip(), 
                 'p_data': data_dia.strftime('%Y-%m-%d'), 
                 'p_horario': horario,
-                'p_caixa': cx
+                'p_caixa': cx,
+                'p_semana_id': id_semana
             }).execute()
         return True
     except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
 
-def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) -> bool:
+def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id_semana: int) -> bool:
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
         
@@ -164,11 +162,13 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
                 
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 
+                # ATUALIZADO: Passando p_semana_id
                 supabase.rpc('save_escala_dia_final', {
                     'p_nome': str(nome).strip(), 
                     'p_data': data_banco, 
                     'p_horario': horario,
-                    'p_caixa': caixa
+                    'p_caixa': caixa,
+                    'p_semana_id': id_semana
                 }).execute()
             
             if index % 5 == 0: barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
@@ -179,12 +179,24 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
 def inicializar_semana_simples(data_inicio: date) -> bool:
     try:
         supabase.rpc('inicializar_escala_semanal', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
+        
+        # Recupera o ID da semana recém criada para inserir os dias iniciais corretamente
+        res = supabase.table('semanas').select('id').eq('data_inicio', data_inicio.strftime('%Y-%m-%d')).execute()
+        if not res.data: return False
+        new_id = res.data[0]['id']
+
         df_colabs = carregar_colaboradores()
         if not df_colabs.empty:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None}).execute()
+                    supabase.rpc('save_escala_dia_final', {
+                        'p_nome': nome, 
+                        'p_data': d.strftime('%Y-%m-%d'), 
+                        'p_horario': '', 
+                        'p_caixa': None,
+                        'p_semana_id': new_id
+                    }).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -402,7 +414,8 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-            if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini):
+            # ATUALIZADO: Passando id_semana
+            if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 @st.fragment
@@ -464,7 +477,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet = writer.sheets['Escala']
 
                     # --- CORREÇÃO DE VISUAL ---
-                    # Esconde as linhas de grade do Excel (deixa fundo branco)
                     worksheet.hide_gridlines(2)
                     
                     # FORMATOS
@@ -489,7 +501,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     
-                    # CORREÇÃO DA BORDA INFINITA: Usamos None no formato da coluna (só largura)
+                    # CORREÇÃO DA BORDA INFINITA
                     worksheet.set_column(0, 0, 30, None)
                     
                     col_idx = 1
@@ -524,7 +536,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        # CORREÇÃO BORDA INFINITA: None no formato
+                        # CORREÇÃO BORDA INFINITA
                         worksheet.set_column(col_idx, col_idx, 12, None)
                         
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
@@ -565,7 +577,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
-                        # Usando as listas ajustadas (9:30 e 10:00 contam nos dois)
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
                         
@@ -589,7 +600,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
             if arquivo_upload is not None:
                 if st.button("🚀 Processar e Salvar", type="primary", key="btn_proc_excel"):
-                    if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini):
+                    # ATUALIZADO: Passando id_semana
+                    if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini, id_semana):
                         st.success("Importado com sucesso!"); time.sleep(2); st.cache_data.clear(); st.rerun()
 
 @st.fragment
