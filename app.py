@@ -47,20 +47,25 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     if pd.isna(data_timestamp): return ""
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=1) 
 def carregar_colaboradores() -> pd.DataFrame:
     try:
-        try:
-            data = supabase.table('colaboradores').select('*').execute().data
-        except:
-            data = supabase.rpc('get_colaboradores').execute().data   
-        df = pd.DataFrame(data)
+        # Pega direto da tabela
+        response = supabase.table('colaboradores').select('*').execute()
+        df = pd.DataFrame(response.data)
+        
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
         return df
-    except Exception as e: st.error(f"Erro ao carregar colaboradores: {e}"); return pd.DataFrame()
+    except Exception as e: 
+        # Fallback
+        try:
+            data = supabase.rpc('get_colaboradores').execute().data
+            return pd.DataFrame(data)
+        except:
+            return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
@@ -160,14 +165,19 @@ def remover_colaboradores(lista_nomes: list) -> bool:
     except Exception as e: st.error(f"Erro: {e}"); return False
 
 def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
+    """
+    Atualiza a função usando a procedure segura do SQL.
+    """
     try:
         supabase.rpc('update_colaborador_funcao', {'p_nome': nome.strip(), 'p_nova_funcao': nova_funcao}).execute()
         return True
-    except Exception as e: st.error(f"Erro ao atualizar função: {e}"); return False
+    except Exception as e: 
+        st.error(f"Erro ao atualizar função de {nome}: {e}")
+        return False
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
-    # --- LISTA DE FISCAIS ---
+    # --- LISTA DE FISCAIS ATUALIZADA ---
     return pd.DataFrame([
         {"codigo": 1017, "nome": "Rogério", "senha": "1"},
         {"codigo": 1002, "nome": "Andrews", "senha": "2"},
@@ -190,7 +200,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     </body></html>
     """
 
-# --- ABAS COM ST.FRAGMENT (PARA EVITAR PULO DE TELA) ---
+# --- ABAS COM ST.FRAGMENT (ESTABILIDADE TOTAL) ---
 
 @st.fragment
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -302,7 +312,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
 
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("📤 Importar Escala via Excel (Por Função)")
-    
     st.markdown("Baixe a planilha, preencha no Excel e envie de volta.")
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     
@@ -368,15 +377,18 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini):
                         st.success("Importado!"); time.sleep(2); st.cache_data.clear()
 
-# --- AQUI ESTÁ A CORREÇÃO DE ESTABILIDADE (ST.FRAGMENT) ---
+# --- ABA DE COLABORADORES COM ST.FRAGMENT (CORRIGIDA E MAIS ROBUSTA) ---
 @st.fragment
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     st.subheader("👥 Gerenciar Colaboradores")
     
     st.markdown("##### ✏️ Classificar / Editar Colaboradores Existentes")
-    st.info("Aqui você pode mudar o cargo de quem já está cadastrado. Altere na tabela e clique em Salvar.")
+    st.info("Aqui você pode mudar o cargo de quem já está cadastrado.")
     
     if not df_colaboradores.empty:
+        # Prepara um dicionário para busca rápida (Nome -> Função Atual)
+        mapa_original = {row['nome']: row['funcao'] for _, row in df_colaboradores.iterrows()}
+        
         df_editor = df_colaboradores.copy()
         
         col_config = {
@@ -384,7 +396,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium")
         }
         
-        # O data_editor agora está dentro do @st.fragment, então não fará a página dar refresh total
+        # EDITOR DE DADOS
         df_editado = st.data_editor(
             df_editor[['nome', 'funcao']], 
             column_config=col_config, 
@@ -396,21 +408,31 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
         if st.button("💾 Salvar Alterações de Cargo"):
             barra = st.progress(0, text="Atualizando cargos...")
             total = len(df_editado)
+            contador_updates = 0
             
             for index, row in df_editado.iterrows():
                 nome = row['nome']
                 nova_funcao = row['funcao']
-                funcao_antiga = df_colaboradores.loc[df_colaboradores['nome'] == nome, 'funcao'].iloc[0]
                 
+                # Compara com o valor original que carregamos do banco
+                funcao_antiga = mapa_original.get(nome, "")
+                
+                # Se mudou, atualiza no banco
                 if nova_funcao != funcao_antiga:
                     atualizar_funcao_colaborador(nome, nova_funcao)
+                    contador_updates += 1
                 
                 if index % 5 == 0: barra.progress((index+1)/total)
             
             barra.empty()
-            st.success("Cargos atualizados!")
+            if contador_updates > 0:
+                st.success(f"{contador_updates} cargos atualizados com sucesso!")
+            else:
+                st.info("Nenhuma alteração detectada para salvar.")
+                
             time.sleep(1)
-            st.rerun() # Atualiza apenas este fragmento
+            st.cache_data.clear()
+            st.rerun()
     else:
         st.info("Sem colaboradores cadastrados.")
 
@@ -425,7 +447,10 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             if st.button("Adicionar", use_container_width=True):
                 if nome_novo: 
                     adicionar_colaborador(nome_novo, funcao_novo)
-                    st.success("Adicionado!"); time.sleep(1); st.rerun()
+                    st.cache_data.clear()
+                    st.success("Adicionado!")
+                    time.sleep(1)
+                    st.rerun()
 
     with c2:
         with st.container(border=True):
@@ -433,7 +458,12 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             if not df_colaboradores.empty:
                 rem = st.multiselect("Selecione para remover:", df_colaboradores['nome'])
                 if st.button("Remover Selecionados", type="secondary", use_container_width=True):
-                    if rem: remover_colaboradores(rem); st.success("Removido!"); time.sleep(1); st.rerun()
+                    if rem: 
+                        remover_colaboradores(rem)
+                        st.cache_data.clear()
+                        st.success("Removido!")
+                        time.sleep(1)
+                        st.rerun()
 
 # --- Main ---
 def main():
