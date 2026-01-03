@@ -78,13 +78,11 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
         params = {'p_semana_id': id_semana}
-        # Agora retorna numero_caixa também
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
             df['nome'] = df['nome'].str.strip()
-            # Garante que numero_caixa existe no DF
             if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
             df['numero_caixa'] = df['numero_caixa'].fillna("")
             
@@ -100,7 +98,6 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
-            # Pega o caixa correspondente se existir, senão manda NULL
             cx = caixas[i] if caixas and i < len(caixas) else None
             
             supabase.rpc('save_escala_dia_final', {
@@ -125,17 +122,15 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
             
             for i in range(7):
                 data_str_header = datas_reais[i]
-                cx_header = f"CX {data_str_header}" # Header do caixa (ex: CX 15/01/2026)
+                cx_header = f"CX {data_str_header}"
                 
-                # Pega horário
                 horario = row.get(data_str_header, "")
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
                 
-                # Pega caixa (se existir na planilha)
                 caixa = row.get(cx_header, None)
                 if pd.isna(caixa): caixa = None
-                else: caixa = str(caixa).strip().replace(".0", "") # Remove .0 de numeros
+                else: caixa = str(caixa).strip().replace(".0", "")
                 
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 
@@ -159,7 +154,6 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    # Envia caixa como NULL ao inicializar
                     supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
@@ -203,9 +197,7 @@ def carregar_fiscais() -> pd.DataFrame:
     ])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
-    # Ajuste de layout CSS para centralizar e remover espaço branco
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
-    
     return f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -213,70 +205,16 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
         <meta charset="UTF-8">
         <title>Escala {nome_colaborador}</title>
         <style>
-            body {{
-                font-family: 'Helvetica Neue', Arial, sans-serif;
-                background-color: #f4f4f4;
-                margin: 0;
-                padding: 20px;
-                display: flex;
-                justify-content: center;
-                align-items: flex-start;
-                min-height: 100vh;
-            }}
-            .container {{
-                background-color: white;
-                padding: 40px;
-                border-radius: 8px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-                width: 100%;
-                max-width: 700px;
-                text-align: center;
-            }}
-            h1 {{
-                color: #2c3e50;
-                font-size: 24px;
-                margin-bottom: 5px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-            }}
-            h2 {{
-                color: #7f8c8d;
-                font-size: 16px;
-                margin-top: 0;
-                margin-bottom: 25px;
-                font-weight: normal;
-            }}
-            table.tabela-escala {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 10px;
-            }}
-            table.tabela-escala th {{
-                background-color: #34495e;
-                color: white;
-                padding: 12px;
-                text-transform: uppercase;
-                font-size: 12px;
-                letter-spacing: 1px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-            }}
-            table.tabela-escala td {{
-                padding: 12px;
-                border-bottom: 1px solid #eee;
-                color: #333;
-                font-size: 14px;
-            }}
-            table.tabela-escala tr:last-child td {{
-                border-bottom: none;
-            }}
-            table.tabela-escala tr:nth-child(even) {{
-                background-color: #f9f9f9;
-            }}
-            @media print {{
-                body {{ background-color: white; }}
-                .container {{ box-shadow: none; border: 1px solid #ddd; max-width: 100%; width: 100%; }}
-            }}
+            body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }}
+            .container {{ background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 700px; text-align: center; }}
+            h1 {{ color: #2c3e50; font-size: 24px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }}
+            h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
+            table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
+            table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; }}
+            table.tabela-escala tr:last-child td {{ border-bottom: none; }}
+            table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            @media print {{ body {{ background-color: white; }} .container {{ box-shadow: none; border: 1px solid #ddd; max-width: 100%; width: 100%; }} }}
         </style>
     </head>
     <body>
@@ -300,12 +238,10 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis)
 
     if nome_selecionado:
-        # Verifica se é operador para mostrar caixa
         is_operador = False
         if 'funcao' in df_colaboradores.columns:
             f = df_colaboradores[df_colaboradores['nome'] == nome_selecionado]['funcao']
-            if not f.empty and f.iloc[0] == "Operador(a) de Caixa":
-                is_operador = True
+            if not f.empty and f.iloc[0] == "Operador(a) de Caixa": is_operador = True
 
         if df_semanas_ativas.empty: st.info("Nenhuma semana disponível."); return
         opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
@@ -320,7 +256,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
                     display = final.copy()
                     display["Data"] = display["data"].apply(formatar_data_completa)
                     
-                    # Se for operador, mostra coluna de caixa
                     cols_to_show = ["Data", "horario"]
                     if is_operador:
                         cols_to_show.append("numero_caixa")
@@ -391,11 +326,9 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         df_full = carregar_escala_semana_por_id(id_semana)
         escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
         
-        # Dicionários de dados atuais
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
         caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
 
-        # Verifica função do colaborador atual
         funcao_atual = "Não definido"
         if 'funcao' in df_colaboradores.columns:
             f = df_colaboradores[df_colaboradores['nome'] == colaborador]['funcao']
@@ -421,23 +354,17 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
-                # Selectbox Horário
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
                 
-                # Selectbox Caixa (apenas se for operador)
                 val_c = None
                 if is_operador:
-                    # LÓGICA INTELIGENTE: Se for folga, trava em "---"
                     if val_h in ["Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                        # Mostra visualmente que está "anulado"
                         st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
                         val_c = "---"
                     else:
-                        # Se estiver trabalhando, mostra o selectbox normal
                         key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
-                        # Garante que o índice existe na lista nova
                         idx_c = LISTA_CAIXAS.index(caixa_atual) if caixa_atual in LISTA_CAIXAS else 0
                         val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=key_c, label_visibility="collapsed")
                 
@@ -470,12 +397,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
         else:
-            # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
-                # Se for Operador, adiciona coluna de caixa ao lado do dia
                 if funcao_selecionada == "Operador(a) de Caixa":
                     colunas.append(f"CX {d_str}")
 
@@ -495,17 +420,32 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
+                    # --- AQUI: Escreve a lista de caixas na coluna B da aba oculta ---
+                    ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # Validação de Dados (Dropdown)
-                    # Se for operador, pula colunas de 2 em 2 (B, D, F...)
-                    # Se não, é corrido (B, C, D...)
-                    last_col_idx = len(colunas) - 1
-                    step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
+                    # Definição de quais colunas validamos
+                    # Se for operador:
+                    #   Horários: colunas 1, 3, 5, 7, 9, 11, 13 (B, D, F...)
+                    #   Caixas:   colunas 2, 4, 6, 8, 10, 12, 14 (C, E, G...)
+                    # Se não:
+                    #   Horários: colunas 1, 2, 3, 4, 5, 6, 7
                     
-                    for c_idx in range(1, len(colunas), step):
-                        worksheet.data_validation(1, c_idx, 100, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                    last_row = len(df_template) + 100
                     
-                    # --- MAPEAMENTO DE NOMES ---
+                    if funcao_selecionada == "Operador(a) de Caixa":
+                        # Validação de Horários
+                        for c_idx in range(1, 15, 2): # Índices impares até 13
+                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                        
+                        # Validação de Caixas
+                        for c_idx in range(2, 16, 2): # Índices pares até 14
+                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
+                            
+                    else:
+                        # Validação padrão (só horários)
+                        for c_idx in range(1, 8):
+                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                    
                     mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
@@ -513,14 +453,20 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.write(row_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    # Fórmulas de total (Apenas nas colunas de horário)
-                    letras_excel = [] # Gera letras A, B, C... para formulas
-                    for i in range(len(colunas)):
-                        # Logica simples para converter indice 0->A, 1->B (funciona até Z, ok para 7 dias)
-                        letras_excel.append(chr(65 + i))
+                    # Fórmulas de total
+                    step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
+                    col_count = len(colunas)
                     
-                    for c_idx in range(1, len(colunas), step):
-                        letra = letras_excel[c_idx]
+                    # Função para converter indice 0->A, 1->B...
+                    def num_to_col(n):
+                        s = ""
+                        while n >= 0:
+                            s = chr(n % 26 + 65) + s
+                            n = n // 26 - 1
+                        return s
+
+                    for c_idx in range(1, col_count, step):
+                        letra = num_to_col(c_idx)
                         rng = f"{letra}2:{letra}{len(df_template)+1}"
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
