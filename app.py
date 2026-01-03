@@ -29,12 +29,25 @@ H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "
 H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
-# Lista de Caixas (Atualizada com "---")
+# Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# Definição de Manhã e Tarde para Excel (Cálculo interno)
-HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
-HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) > 10]
+# --- LÓGICA DE CORTE MANHÃ / TARDE (AJUSTADA) ---
+def calcular_minutos(horario_str):
+    """Converte '9:30 HRS' em minutos (ex: 570) para comparação precisa."""
+    if "HRS" not in horario_str: return -1
+    try:
+        # Pega a parte da hora "9:30"
+        time_part = horario_str.split(' ')[0]
+        h, m = map(int, time_part.split(':'))
+        return h * 60 + m
+    except:
+        return -1
+
+# Definindo o ponto de corte: 9:30 (9*60 + 30 = 570 minutos)
+# Quem for menor que 570 minutos é MANHÃ. Quem for >= 570 é TARDE.
+HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) < 570]
+HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
@@ -85,13 +98,11 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
         params = {'p_semana_id': id_semana}
-        # Agora retorna numero_caixa também
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
             df['nome'] = df['nome'].str.strip()
-            # Garante que numero_caixa existe no DF
             if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
             df['numero_caixa'] = df['numero_caixa'].fillna("")
             
@@ -107,7 +118,6 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
-            # Pega o caixa correspondente se existir, senão manda NULL
             cx = caixas[i] if caixas and i < len(caixas) else None
             
             supabase.rpc('save_escala_dia_final', {
@@ -133,14 +143,12 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
             for i in range(7):
                 data_str_header = datas_reais[i]
                 
-                # Pega horário (busca pelo nome da coluna data)
                 horario = ""
                 if data_str_header in df_excel.columns:
                     horario = row[data_str_header]
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
                 
-                # Pega caixa (Lógica Inteligente: Pega a coluna IMEDIATAMENTE APÓS a data)
                 caixa = None
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
@@ -451,6 +459,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     df_template.to_excel(writer, index=False, sheet_name='Escala')
                     workbook = writer.book
                     worksheet = writer.sheets['Escala']
+
+                    # --- CORREÇÃO DE VISUAL ---
+                    # Esconde as linhas de grade (grids) para o Excel ficar limpo
+                    worksheet.hide_gridlines(2)
                     
                     # FORMATOS
                     fmt_grid = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
@@ -544,15 +556,28 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     for i in range(total_data_cols):
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
+                        
+                        # Usando as listas ajustadas (9:30 já é tarde)
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
-                        worksheet.write_formula(row_total_m, current_col, f"=SUM({crit_m})", fmt_manha)
-                        worksheet.write_formula(row_total_t, current_col, f"=SUM({crit_t})", fmt_tarde)
+                        
+                        # Escreve a fórmula SOMA(CONT.SE(...))
+                        # Se as listas estiverem vazias (ex: nenhum horário cadastrado), trata o erro
+                        if crit_m:
+                            worksheet.write_formula(row_total_m, current_col, f"=SUM({crit_m})", fmt_manha)
+                        else:
+                            worksheet.write(row_total_m, current_col, 0, fmt_manha)
+
+                        if crit_t:
+                            worksheet.write_formula(row_total_t, current_col, f"=SUM({crit_t})", fmt_tarde)
+                        else:
+                            worksheet.write(row_total_t, current_col, 0, fmt_tarde)
+                            
                         current_col += step
 
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
 
-            st.download_button(label=f"📥 Baixar Escala Pronta", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
+            st.download_button(label=f"📥 Baixar Planilha (Preenchida ou Modelo)", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
             
             st.markdown("---")
             arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
