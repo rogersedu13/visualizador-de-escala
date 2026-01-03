@@ -394,27 +394,34 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
+@st.fragment
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
-    st.subheader("📤 Importar Escala via Excel (Por Função)")
-    st.markdown("Baixe a planilha, preencha no Excel e envie de volta.")
+    st.subheader("📤 Importar / Baixar Escala (Excel)")
+    st.info("Utilize esta aba para baixar a escala pronta (como backup/impressão) ou para baixar o modelo e preencher offline.")
+    
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     
     col1, col2 = st.columns(2)
     with col1:
-        funcao_selecionada = st.selectbox("1. Qual função deseja baixar?", FUNCOES_LOJA, key="sel_func_down")
+        funcao_selecionada = st.selectbox("1. Qual função?", FUNCOES_LOJA, key="sel_func_down")
     with col2:
         opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
-        semana_str = st.selectbox("2. Selecione a semana:", options=opcoes.keys(), key="sel_sem_imp")
+        semana_str = st.selectbox("2. Qual semana?", options=opcoes.keys(), key="sel_sem_imp")
         semana_info = opcoes[semana_str]
     
     if semana_info and funcao_selecionada:
         data_ini = semana_info['data_inicio']
+        id_semana = semana_info['id']
+        
+        # Carrega dados do banco para pré-preencher (Feature de Download Pronto)
+        df_dados_db = carregar_escala_semana_por_id(id_semana)
+        
         df_filtrado = df_colaboradores.copy()
         if 'funcao' in df_filtrado.columns:
             df_filtrado = df_filtrado[df_filtrado['funcao'] == funcao_selecionada]
         
         if df_filtrado.empty:
-            st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
+            st.error(f"Não há colaboradores com função '{funcao_selecionada}'.")
         else:
             # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
@@ -422,11 +429,21 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
                 if funcao_selecionada == "Operador(a) de Caixa":
-                    # Nome interno temporário para o DF
                     colunas.append(f"CX_REF_{d_str}")
 
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
+            
+            # Criar dicionário de dados existentes para preenchimento rápido
+            dados_existentes = {}
+            if not df_dados_db.empty:
+                df_db_filt = df_dados_db[df_dados_db['nome'].isin(df_filtrado['nome'])]
+                for _, row_db in df_db_filt.iterrows():
+                    d_db = pd.to_datetime(row_db['data']).date()
+                    dados_existentes[(row_db['nome'], d_db)] = {
+                        'horario': row_db['horario'],
+                        'caixa': row_db['numero_caixa']
+                    }
             
             buffer = io.BytesIO()
             try:
@@ -436,19 +453,14 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet = writer.sheets['Escala']
                     
                     # FORMATOS
-                    # 1. Padrão para tudo (Bordas + Centro)
                     fmt_grid = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
-                    
-                    # 2. Cabeçalhos
                     fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3', 'border': 1})
                     fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) 
                     fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})
                     
-                    # 3. Totais
                     fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     
-                    # 4. Cores Condicionais (Agora com borda)
                     fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter', 'border': 1})
@@ -459,47 +471,50 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # Coluna Nome (A1)
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     worksheet.set_column(0, 0, 30, fmt_nome)
                     
                     col_idx = 1
-                    mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
-                    nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
+                    last_data_row = len(df_template) # Ex: 10 nomes
+                    row_total_m = last_data_row + 1
+                    row_total_t = last_data_row + 2
                     
-                    # Definindo onde terminam os dados e começam os totais
-                    last_data_row = len(df_template) # Ex: se tem 10 funcionarios, last_row = 10 (indices 1..10)
-                    row_total_m = last_data_row + 1 # Linha do Total Manhã
-                    row_total_t = last_data_row + 2 # Linha do Total Tarde
-                    
-                    # Loop para configurar cabeçalhos e validações
+                    # Preenchendo dados existentes no Excel
+                    for r_idx, row_name in enumerate(df_template['Nome']):
+                        row_excel = r_idx + 1
+                        worksheet.write(row_excel, 0, row_name, fmt_nome) # Reescreve nome com borda
+                        
+                        current_c = 1
+                        for i_day in range(7):
+                            d_atual = data_ini + timedelta(days=i_day)
+                            info = dados_existentes.get((row_name, d_atual), {})
+                            
+                            # Horário
+                            h_val = info.get('horario', "")
+                            worksheet.write(row_excel, current_c, h_val, fmt_grid)
+                            current_c += 1
+                            
+                            # Caixa
+                            if funcao_selecionada == "Operador(a) de Caixa":
+                                c_val = info.get('caixa', "")
+                                worksheet.write(row_excel, current_c, c_val, fmt_grid)
+                                current_c += 1
+
+                    # Cabeçalhos e Validações
+                    col_idx = 1
                     for i in range(7):
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
-                        # --- COLUNA DATA ---
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
                         worksheet.set_column(col_idx, col_idx, 12, fmt_grid)
-                        
-                        # Validação apenas nas linhas de DADOS (não nos totais)
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         
-                        # Cores Condicionais (apenas dados)
-                        # Vermelho
-                        for h in H_VERMELHO:
-                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_vermelho})
-                        # Verde
-                        for h in H_VERDE:
-                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_verde})
-                        # Roxo
-                        for h in H_ROXO:
-                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_roxo})
-                        # Cinza
-                        for h in H_CINZA:
-                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_cinza})
-                        # Amarelo
-                        for h in H_AMARELO:
-                            worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_amarelo})
+                        for h in H_VERMELHO: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_vermelho})
+                        for h in H_VERDE: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_verde})
+                        for h in H_ROXO: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_roxo})
+                        for h in H_CINZA: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_cinza})
+                        for h in H_AMARELO: worksheet.conditional_format(1, col_idx, last_data_row, col_idx, {'type': 'cell', 'criteria': 'equal to', 'value': f'"{h}"', 'format': fmt_amarelo})
 
                         col_idx += 1
                         
@@ -510,13 +525,13 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             col_idx += 1
                     
                     # --- TOTAIS ---
+                    mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
+                    nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
-                    # Escreve os rótulos "Total Manhã" e "Total Tarde"
                     worksheet.write(row_total_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_total_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
                     step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
-                    
                     def num_to_col(n):
                         s = ""
                         while n >= 0:
@@ -526,36 +541,25 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
 
                     total_data_cols = 7
                     current_col = 1
-                    
                     for i in range(total_data_cols):
                         letra = num_to_col(current_col)
-                        # Intervalo de dados para o COUNTIF: da linha 2 até a ultima linha de dados
                         rng = f"{letra}2:{letra}{last_data_row+1}"
-                        
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
-                        
                         worksheet.write_formula(row_total_m, current_col, f"=SUM({crit_m})", fmt_manha)
                         worksheet.write_formula(row_total_t, current_col, f"=SUM({crit_t})", fmt_tarde)
-                        
-                        # Se tiver coluna de caixa, a célula do total abaixo dela deve ficar em branco mas com borda (ou sem borda, depende do gosto).
-                        # Aqui vou deixar em branco para não poluir, mas se quiser borda, descomente:
-                        if step == 2:
-                             worksheet.write(row_total_m, current_col+1, "", fmt_manha)
-                             worksheet.write(row_total_t, current_col+1, "", fmt_tarde)
-
                         current_col += step
 
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
 
-            st.download_button(label=f"📥 Baixar Planilha - {funcao_selecionada}", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
+            st.download_button(label=f"📥 Baixar Escala Pronta", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
             
             st.markdown("---")
-            arquivo_upload = st.file_uploader("Arraste o Excel preenchido:", type=["xlsx"])
+            arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
             if arquivo_upload is not None:
-                if st.button("🚀 Processar e Salvar", type="primary"):
+                if st.button("🚀 Processar e Salvar", type="primary", key="btn_proc_excel"):
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini):
-                        st.success("Importado!"); time.sleep(2); st.cache_data.clear()
+                        st.success("Importado com sucesso!"); time.sleep(2); st.cache_data.clear(); st.rerun()
 
 @st.fragment
 def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
@@ -651,7 +655,7 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar Escala (Manual)", "Importar Excel", "Colaboradores", "Visão Geral"])
+        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar Escala (Manual)", "Importar / Baixar", "Colaboradores", "Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
         with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas)
