@@ -436,27 +436,34 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet = writer.sheets['Escala']
                     
                     # FORMATOS
+                    # 1. Padrão para tudo (Bordas + Centro)
+                    fmt_grid = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
+                    
+                    # 2. Cabeçalhos
                     fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3', 'border': 1})
                     fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) 
                     fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})
                     
-                    fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0', 'align': 'center', 'valign': 'vcenter'})
+                    # 3. Totais
+                    fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     
-                    # --- FORMATOS DE CORES CONDICIONAIS + ALINHAMENTO ---
-                    fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter'})
-                    fmt_center   = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
+                    # 4. Cores Condicionais (Agora com borda)
+                    fmt_vermelho = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    fmt_verde    = workbook.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter', 'border': 1})
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
+                    # Coluna Nome (A1) - Com borda e alinhada a esquerda (padrão nomes) ou centro
+                    # Optei por esquerda para nomes por estética, mas com borda
+                    fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
-                    worksheet.set_column(0, 0, 30)
+                    worksheet.set_column(0, 0, 30, fmt_nome)
                     
                     col_idx = 1
                     last_data_row = len(df_template) + 100
@@ -467,8 +474,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         # --- COLUNA DATA (Aplicar Cores Aqui) ---
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        # Aplica formato centralizado e largura na coluna inteira
-                        worksheet.set_column(col_idx, col_idx, 12, fmt_center)
+                        # Aplica formato de borda e centro na coluna toda
+                        worksheet.set_column(col_idx, col_idx, 12, fmt_grid)
                         
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                         
@@ -493,8 +500,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            # Aplica formato centralizado e largura na coluna inteira
-                            worksheet.set_column(col_idx, col_idx, 5, fmt_center)
+                            # Aplica formato de borda e centro na coluna toda
+                            worksheet.set_column(col_idx, col_idx, 5, fmt_grid)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
