@@ -21,7 +21,7 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# Definição de Manhã e Tarde para Excel
+# Definição de Manhã e Tarde para Excel (Cálculo interno, não aparece o texto)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) > 10]
 
@@ -93,7 +93,6 @@ def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bo
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
-            # Usa RPC recriada no SQL
             supabase.rpc('save_escala_dia_final', {
                 'p_nome': nome.strip(), 
                 'p_data': data_dia.strftime('%Y-%m-%d'), 
@@ -115,7 +114,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
         
         for index, row in df_excel.iterrows():
             nome = row['Nome']
-            if pd.isna(nome) or str(nome).strip() == "" or str(nome).startswith("TOTAL"): continue
+            if pd.isna(nome) or str(nome).strip() == "" or str(nome).startswith("TOTAL") or str(nome).startswith("Operadoras") or str(nome).startswith("Empacotadores") or str(nome).startswith("Fiscais") or str(nome).startswith("Recepção"): continue
             
             for i in range(7):
                 data_str_header = datas_reais[i]
@@ -154,9 +153,7 @@ def arquivar_reativar_semana(id_semana: int, novo_status: bool):
     except Exception as e: st.error(f"Erro: {e}"); return False
 
 def adicionar_colaborador(nome: str, funcao: str) -> bool:
-    """Função reescrita para inserção direta, mais garantida."""
     try:
-        # Inserção direta na tabela
         supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao}).execute()
         return True
     except Exception as e: 
@@ -196,7 +193,7 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
         th, td {{ padding: 10px; text-align: center; border: 1px solid #ddd; }}
         thead {{ background-color: #f2f2f2; }} tr:nth-child(even) {{ background-color: #f9f9f9; }}
     </style></head><body>
-        <h1>Escala Semanal</h1><h2>{nome_colaborador} - {semana_str}</h2>
+        <h1>Escala</h1><h2>{nome_colaborador} - {semana_str}</h2>
         {tabela_html}
     </body></html>
     """
@@ -354,9 +351,20 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     last_row = len(df_template) + 1
                     worksheet.data_validation(1, 1, last_row + 20, 7, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
                     
+                    # --- LÓGICA DE NOMES SIMPLIFICADOS ---
+                    mapa_nomes = {
+                        "Operador(a) de Caixa": "Operadoras",
+                        "Empacotador(a)": "Empacotadores",
+                        "Fiscal de Caixa": "Fiscais",
+                        "Recepção": "Recepção"
+                    }
+                    nome_cargo = mapa_nomes.get(funcao_selecionada, "Total")
+                    
                     row_total_manha = last_row + 2; row_total_tarde = last_row + 3
-                    worksheet.write(row_total_manha, 0, "TOTAL MANHÃ (<=10h)", fmt_manha)
-                    worksheet.write(row_total_tarde, 0, "TOTAL TARDE (>10h)", fmt_tarde)
+                    
+                    # Aqui usamos o nome simplificado sem (<=10h)
+                    worksheet.write(row_total_manha, 0, f"{nome_cargo} Manhã", fmt_manha)
+                    worksheet.write(row_total_tarde, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
                     letras = ['B', 'C', 'D', 'E', 'F', 'G', 'H']
                     for i, letra in enumerate(letras):
@@ -478,7 +486,7 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar (Manual)", "Importar Excel", "Colaboradores", "Visão Pública"])
+        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar Escala (Manual)", "Importar Excel", "Colaboradores", "Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
         with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas)
