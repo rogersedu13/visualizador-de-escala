@@ -78,11 +78,13 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
         params = {'p_semana_id': id_semana}
+        # Agora retorna numero_caixa também
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
             df['nome'] = df['nome'].str.strip()
+            # Garante que numero_caixa existe no DF
             if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
             df['numero_caixa'] = df['numero_caixa'].fillna("")
             
@@ -98,6 +100,7 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
+            # Pega o caixa correspondente se existir, senão manda NULL
             cx = caixas[i] if caixas and i < len(caixas) else None
             
             supabase.rpc('save_escala_dia_final', {
@@ -122,15 +125,27 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) ->
             
             for i in range(7):
                 data_str_header = datas_reais[i]
-                cx_header = f"CX {data_str_header}"
                 
-                horario = row.get(data_str_header, "")
+                # Pega horário (busca pelo nome da coluna data)
+                horario = ""
+                if data_str_header in df_excel.columns:
+                    horario = row[data_str_header]
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
                 
-                caixa = row.get(cx_header, None)
-                if pd.isna(caixa): caixa = None
-                else: caixa = str(caixa).strip().replace(".0", "")
+                # Pega caixa (Lógica Inteligente: Pega a coluna IMEDIATAMENTE APÓS a data)
+                caixa = None
+                try:
+                    # Encontra o índice da coluna de data
+                    col_idx = df_excel.columns.get_loc(data_str_header)
+                    # O caixa está na coluna seguinte (+1)
+                    # Verifica se existe coluna seguinte e se ela tem valor
+                    if col_idx + 1 < len(df_excel.columns):
+                        val_caixa = row.iloc[col_idx + 1]
+                        if not pd.isna(val_caixa):
+                            caixa = str(val_caixa).strip().replace(".0", "")
+                except:
+                    caixa = None
                 
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 
@@ -154,6 +169,7 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
+                    # Envia caixa como NULL ao inicializar
                     supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
@@ -197,6 +213,7 @@ def carregar_fiscais() -> pd.DataFrame:
     ])
 
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
+    # Ajuste de layout CSS para centralizar e remover espaço branco
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
     <!DOCTYPE html>
@@ -397,12 +414,15 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
         else:
+            # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
+                # Se for Operador, adiciona coluna de caixa ao lado do dia
                 if funcao_selecionada == "Operador(a) de Caixa":
-                    colunas.append(f"CX {d_str}")
+                    # Coluna de caixa agora chama-se apenas "CX" visualmente, mas precisamos de espaço no DF
+                    colunas.append(f"CX_REF_{d_str}") # Nome interno temporário
 
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
@@ -414,38 +434,40 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     workbook = writer.book
                     worksheet = writer.sheets['Escala']
                     
-                    fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3'})
+                    # FORMATOS DE CORES
+                    fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3', 'border': 1})
+                    fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) # Azul claro
+                    fmt_cx_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#FFF2CC', 'border': 1, 'font_color': 'black'})   # Amarelo claro
+                    
                     fmt_manha = workbook.add_format({'bold': True, 'font_color': 'blue', 'bg_color': '#E0F7FA'})
                     fmt_tarde = workbook.add_format({'bold': True, 'font_color': 'orange', 'bg_color': '#FFF3E0'})
                     
+                    # Escreve abas ocultas para validação
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
-                    # --- AQUI: Escreve a lista de caixas na coluna B da aba oculta ---
                     ws_data.write_column('B1', LISTA_CAIXAS)
                     
-                    # Definição de quais colunas validamos
-                    # Se for operador:
-                    #   Horários: colunas 1, 3, 5, 7, 9, 11, 13 (B, D, F...)
-                    #   Caixas:   colunas 2, 4, 6, 8, 10, 12, 14 (C, E, G...)
-                    # Se não:
-                    #   Horários: colunas 1, 2, 3, 4, 5, 6, 7
+                    # --- SOBRESCREVENDO CABEÇALHOS COM CORES E NOMES LIMPOS ---
+                    # Coluna Nome (A1)
+                    worksheet.write(0, 0, "Nome", fmt_bold)
                     
-                    last_row = len(df_template) + 100
-                    
-                    if funcao_selecionada == "Operador(a) de Caixa":
-                        # Validação de Horários
-                        for c_idx in range(1, 15, 2): # Índices impares até 13
-                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                    col_idx = 1
+                    for i in range(7):
+                        d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
+                        # Escreve DATA (Azul)
+                        worksheet.write(0, col_idx, d_str, fmt_date_header)
+                        # Validação Horário
+                        worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                        col_idx += 1
                         
-                        # Validação de Caixas
-                        for c_idx in range(2, 16, 2): # Índices pares até 14
-                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
-                            
-                    else:
-                        # Validação padrão (só horários)
-                        for c_idx in range(1, 8):
-                            worksheet.data_validation(1, c_idx, last_row, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                        if funcao_selecionada == "Operador(a) de Caixa":
+                            # Escreve CAIXA (Amarelo) - Nome apenas "CX"
+                            worksheet.write(0, col_idx, "CX", fmt_cx_header)
+                            # Validação Caixa
+                            worksheet.data_validation(1, col_idx, 100, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
+                            col_idx += 1
                     
+                    # --- TOTAIS ---
                     mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
@@ -453,11 +475,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.write(row_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    # Fórmulas de total
+                    # Fórmulas
+                    # Se for operador, pula de 2 em 2. Se não, de 1 em 1.
                     step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
-                    col_count = len(colunas)
                     
-                    # Função para converter indice 0->A, 1->B...
                     def num_to_col(n):
                         s = ""
                         while n >= 0:
@@ -465,13 +486,19 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             n = n // 26 - 1
                         return s
 
-                    for c_idx in range(1, col_count, step):
-                        letra = num_to_col(c_idx)
+                    # Loop apenas nas colunas de DATA para somar horários
+                    # Total de colunas geradas no DF (sem contar Nome)
+                    total_data_cols = 7
+                    current_col = 1
+                    
+                    for i in range(total_data_cols):
+                        letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{len(df_template)+1}"
                         crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                         crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
-                        worksheet.write_formula(row_m, c_idx, f"=SUM({crit_m})", fmt_manha)
-                        worksheet.write_formula(row_t, c_idx, f"=SUM({crit_t})", fmt_tarde)
+                        worksheet.write_formula(row_m, current_col, f"=SUM({crit_m})", fmt_manha)
+                        worksheet.write_formula(row_t, current_col, f"=SUM({crit_t})", fmt_tarde)
+                        current_col += step # Pula para a próxima coluna de data
 
                     worksheet.set_column('A:A', 30)
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
@@ -579,7 +606,7 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar Escala (Manual)", "Importar Excel", "Colaboradores", "Visão Pública"])
+        t1, t2, t3, t4, t5 = st.tabs(["Gerenciar Semanas", "Editar Escala (Manual)", "Importar Excel", "Colaboradores", "Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
         with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas)
