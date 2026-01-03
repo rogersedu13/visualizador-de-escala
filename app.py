@@ -21,6 +21,9 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
+# Lista de Caixas (1 a 17 + Self)
+LISTA_CAIXAS = ["", "Self"] + [str(i) for i in range(1, 18)]
+
 # Definição de Manhã e Tarde para Excel (Cálculo interno)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) <= 10]
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and int(h.split(':')[0]) > 10]
@@ -74,11 +77,16 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
         params = {'p_semana_id': id_semana}
+        # Agora retorna numero_caixa também
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
             df['nome'] = df['nome'].str.strip()
+            # Garante que numero_caixa existe no DF
+            if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
+            df['numero_caixa'] = df['numero_caixa'].fillna("")
+            
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
@@ -87,14 +95,18 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
         return df
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
-def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bool:
+def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inicio: date) -> bool:
     try:
         for i, horario in enumerate(horarios):
             data_dia = data_inicio + timedelta(days=i)
+            # Pega o caixa correspondente se existir, senão manda NULL
+            cx = caixas[i] if caixas and i < len(caixas) else None
+            
             supabase.rpc('save_escala_dia_final', {
                 'p_nome': nome.strip(), 
                 'p_data': data_dia.strftime('%Y-%m-%d'), 
-                'p_horario': horario
+                'p_horario': horario,
+                'p_caixa': cx
             }).execute()
         return True
     except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
@@ -102,30 +114,36 @@ def salvar_escala_individual(nome: str, horarios: list, data_inicio: date) -> bo
 def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date) -> bool:
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
-        colunas_excel = df_excel.columns.tolist()
-        if 'Nome' not in colunas_excel:
-            st.error("O arquivo Excel precisa ter uma coluna chamada 'Nome'.")
-            return False
         
         barra = st.progress(0, text="Processando arquivo...")
         total_linhas = len(df_excel)
         
         for index, row in df_excel.iterrows():
-            nome = row['Nome']
-            # Pula linhas de totais ou vazias
+            nome = row.get('Nome')
             if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome) or "Manhã" in str(nome) or "Tarde" in str(nome): continue
             
             for i in range(7):
                 data_str_header = datas_reais[i]
-                horario = ""
-                if data_str_header in df_excel.columns: horario = row[data_str_header]
-                elif len(row) > i+1: horario = row.iloc[i+1]
+                cx_header = f"CX {data_str_header}" # Header do caixa (ex: CX 15/01/2026)
                 
+                # Pega horário
+                horario = row.get(data_str_header, "")
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
+                
+                # Pega caixa (se existir na planilha)
+                caixa = row.get(cx_header, None)
+                if pd.isna(caixa): caixa = None
+                else: caixa = str(caixa).strip().replace(".0", "") # Remove .0 de numeros
+                
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 
-                supabase.rpc('save_escala_dia_final', {'p_nome': str(nome).strip(), 'p_data': data_banco, 'p_horario': horario}).execute()
+                supabase.rpc('save_escala_dia_final', {
+                    'p_nome': str(nome).strip(), 
+                    'p_data': data_banco, 
+                    'p_horario': horario,
+                    'p_caixa': caixa
+                }).execute()
             
             if index % 5 == 0: barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
         barra.empty()
@@ -140,7 +158,8 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': ''}).execute()
+                    # Envia caixa como NULL ao inicializar
+                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -207,6 +226,13 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis)
 
     if nome_selecionado:
+        # Verifica se é operador para mostrar caixa
+        is_operador = False
+        if 'funcao' in df_colaboradores.columns:
+            f = df_colaboradores[df_colaboradores['nome'] == nome_selecionado]['funcao']
+            if not f.empty and f.iloc[0] == "Operador(a) de Caixa":
+                is_operador = True
+
         if df_semanas_ativas.empty: st.info("Nenhuma semana disponível."); return
         opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
         semana_str = st.selectbox("2. Selecione a semana:", options=opcoes_semana.keys())
@@ -219,10 +245,20 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 if not final.empty:
                     display = final.copy()
                     display["Data"] = display["data"].apply(formatar_data_completa)
-                    display.rename(columns={"horario": "Horário"}, inplace=True)
-                    st.dataframe(display[["Data", "Horário"]], use_container_width=True, hide_index=True)
                     
-                    html = gerar_html_escala(display[["Data", "Horário"]], nome_selecionado, semana_str)
+                    # Se for operador, mostra coluna de caixa
+                    cols_to_show = ["Data", "horario"]
+                    if is_operador:
+                        cols_to_show.append("numero_caixa")
+                        display.rename(columns={"horario": "Horário", "numero_caixa": "Caixa"}, inplace=True)
+                        cols_renamed = ["Data", "Horário", "Caixa"]
+                    else:
+                        display.rename(columns={"horario": "Horário"}, inplace=True)
+                        cols_renamed = ["Data", "Horário"]
+
+                    st.dataframe(display[cols_renamed], use_container_width=True, hide_index=True)
+                    
+                    html = gerar_html_escala(display[cols_renamed], nome_selecionado, semana_str)
                     b64 = base64.b64encode(html.encode('utf-8')).decode()
                     nome_arq = f"escala_{nome_selecionado.strip().replace(' ','_')}.html"
                     st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="{nome_arq}" style="background-color:#0068c9;color:white;padding:0.5em;text-decoration:none;border-radius:5px;">🖨️ Baixar para Impressão</a>', unsafe_allow_html=True)
@@ -280,30 +316,53 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         id_semana = semana_info['id']; data_ini = semana_info['data_inicio']
         df_full = carregar_escala_semana_por_id(id_semana)
         escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
+        
+        # Dicionários de dados atuais
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
+        caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
 
+        # Verifica função do colaborador atual
         funcao_atual = "Não definido"
         if 'funcao' in df_colaboradores.columns:
             f = df_colaboradores[df_colaboradores['nome'] == colaborador]['funcao']
             if not f.empty: funcao_atual = f.iloc[0]
+        
+        is_operador = (funcao_atual == "Operador(a) de Caixa")
 
         st.markdown(f"**Editando:** `{colaborador}` ({funcao_atual})")
-        cols = st.columns(7); horarios_novos = []
+        
+        cols = st.columns(7)
+        novos_horarios = []
+        novos_caixas = []
+        
         for i in range(7):
             dia_atual = data_ini + timedelta(days=i)
             dia_label = f"{DIAS_SEMANA_PT[i]}\n({dia_atual.strftime('%d/%m')})"
+            
             horario_atual = horarios_atuais.get(dia_atual, "")
-            try: idx = HORARIOS_PADRAO.index(horario_atual)
-            except ValueError: idx = 0
+            caixa_atual = caixas_atuais.get(dia_atual, "")
+            if pd.isna(caixa_atual): caixa_atual = ""
+            
+            idx_h = HORARIOS_PADRAO.index(horario_atual) if horario_atual in HORARIOS_PADRAO else 0
+            idx_c = LISTA_CAIXAS.index(caixa_atual) if caixa_atual in LISTA_CAIXAS else 0
+            
             with cols[i]:
                 st.caption(dia_label)
-                key_widget = f"sel_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
-                val = st.selectbox("H", HORARIOS_PADRAO, index=idx, key=key_widget, label_visibility="collapsed")
-                horarios_novos.append(val)
+                # Selectbox Horário
+                key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
+                val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
+                novos_horarios.append(val_h)
+                
+                # Selectbox Caixa (apenas se for operador)
+                val_c = None
+                if is_operador:
+                    key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
+                    val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=key_c, label_visibility="collapsed")
+                novos_caixas.append(val_c)
         
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-            if salvar_escala_individual(colaborador, horarios_novos, data_ini):
+            if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -328,7 +387,15 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'. Vá em 'Colaboradores' e classifique-os.")
         else:
-            colunas = ['Nome'] + [(data_ini + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
+            # GERA AS COLUNAS DO EXCEL
+            colunas = ['Nome']
+            for i in range(7):
+                d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
+                colunas.append(d_str)
+                # Se for Operador, adiciona coluna de caixa ao lado do dia
+                if funcao_selecionada == "Operador(a) de Caixa":
+                    colunas.append(f"CX {d_str}")
+
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
             
@@ -346,35 +413,38 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
                     
-                    last_row = len(df_template) + 1
-                    worksheet.data_validation(1, 1, last_row + 20, 7, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                    # Validação de Dados (Dropdown)
+                    # Se for operador, pula colunas de 2 em 2 (B, D, F...)
+                    # Se não, é corrido (B, C, D...)
+                    last_col_idx = len(colunas) - 1
+                    step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
                     
-                    # --- MAPEAMENTO DE NOMES (CORREÇÃO AQUI) ---
-                    # Define o nome que vai aparecer no Excel baseado na seleção
-                    mapa_nomes = {
-                        "Operador(a) de Caixa": "Operadoras",
-                        "Empacotador(a)": "Empacotadores",
-                        "Fiscal de Caixa": "Fiscais",
-                        "Recepção": "Recepção"
-                    }
-                    # Pega o nome simplificado, se não achar usa o original
+                    for c_idx in range(1, len(colunas), step):
+                        worksheet.data_validation(1, c_idx, 100, c_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
+                    
+                    # --- MAPEAMENTO DE NOMES ---
+                    mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
-                    row_total_manha = last_row + 2; row_total_tarde = last_row + 3
+                    row_m = len(df_template) + 2; row_t = len(df_template) + 3
+                    worksheet.write(row_m, 0, f"{nome_cargo} Manhã", fmt_manha)
+                    worksheet.write(row_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    # Escreve o nome simplificado SEM o texto (<=10h)
-                    worksheet.write(row_total_manha, 0, f"{nome_cargo} Manhã", fmt_manha)
-                    worksheet.write(row_total_tarde, 0, f"{nome_cargo} Tarde", fmt_tarde)
+                    # Fórmulas de total (Apenas nas colunas de horário)
+                    letras_excel = [] # Gera letras A, B, C... para formulas
+                    for i in range(len(colunas)):
+                        # Logica simples para converter indice 0->A, 1->B (funciona até Z, ok para 7 dias)
+                        letras_excel.append(chr(65 + i))
                     
-                    letras = ['B', 'C', 'D', 'E', 'F', 'G', 'H']
-                    for i, letra in enumerate(letras):
-                        rng = f"{letra}2:{letra}{last_row+1}"
-                        crit_manha = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
-                        crit_tarde = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
-                        worksheet.write_formula(row_total_manha, i+1, f"=SUM({crit_manha})", fmt_manha)
-                        worksheet.write_formula(row_total_tarde, i+1, f"=SUM({crit_tarde})", fmt_tarde)
+                    for c_idx in range(1, len(colunas), step):
+                        letra = letras_excel[c_idx]
+                        rng = f"{letra}2:{letra}{len(df_template)+1}"
+                        crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
+                        crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
+                        worksheet.write_formula(row_m, c_idx, f"=SUM({crit_m})", fmt_manha)
+                        worksheet.write_formula(row_t, c_idx, f"=SUM({crit_t})", fmt_tarde)
 
-                    worksheet.set_column('A:A', 30); worksheet.set_column('B:H', 18)
+                    worksheet.set_column('A:A', 30)
             except Exception as e: st.error(f"Erro ao gerar Excel: {e}"); return
 
             st.download_button(label=f"📥 Baixar Planilha - {funcao_selecionada}", data=buffer.getvalue(), file_name=f"escala_{funcao_selecionada.split()[0]}_{data_ini.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="secondary")
