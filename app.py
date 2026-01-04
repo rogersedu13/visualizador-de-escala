@@ -22,13 +22,6 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# --- CONSTANTES DE CORES (PARA O EXCEL) ---
-H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
-H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
-H_CINZA    = ["Folga"]
-H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
-
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
@@ -41,10 +34,6 @@ def calcular_minutos(horario_str):
         return h * 60 + m
     except:
         return 9999
-
-# Regras de Negócio para Totais do Excel
-HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
-HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
@@ -72,9 +61,7 @@ def formatar_lista_folgas_multilinha(lista_nomes, step=2):
     """Quebra a lista de nomes em várias linhas a cada 'step' nomes."""
     if not lista_nomes: return ""
     sorted_nomes = sorted([n for n in lista_nomes if n])
-    # Divide a lista em pedaços de tamanho 'step'
     chunks = [sorted_nomes[i:i + step] for i in range(0, len(sorted_nomes), step)]
-    # Junta cada pedaço com vírgula e depois junta os pedaços com <br>
     return "<br>".join([", ".join(chunk) for chunk in chunks])
 
 @st.cache_data(ttl=1) 
@@ -331,16 +318,18 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     todos_horarios = set(list(ops_agrupado.keys()) + list(emp_agrupado.keys()))
     horarios_ordenados = sorted(list(todos_horarios), key=lambda x: calcular_minutos(x))
 
-    # --- MONTA AS LINHAS DA TABELA (COM SEPARADOR) ---
+    # --- MONTA AS LINHAS DA TABELA (5 COLUNAS) ---
     rows_html = ""
     
     for h_str in horarios_ordenados:
+        h_clean = h_str.replace(" HRS", "H")
+        
         ops_list = ops_agrupado.get(h_str, [])
         emp_list = emp_agrupado.get(h_str, [])
         
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
-        # Pula linha entre horários (linha fina cinza)
+        # Linha separadora
         if rows_html != "":
             rows_html += "<tr class='spacer-row'><td colspan='5'></td></tr>"
 
@@ -348,22 +337,21 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             # Op (Coluna 1, 2, 3)
             if op:
                 cx_display = op['cx']
-                # NOME E HORÁRIO JUNTOS
-                op_content = f"{op['nome']} - {op['h_clean']}"
-                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td>"
+                # NOME ALINHADO A DIREITA (Perto do Horário)
+                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col right-align'>{op['nome']}</td><td class='horario-col'>{h_clean}</td>"
             else:
-                op_html = "<td class='cx-col'></td><td class='nome-col'></td>"
+                op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
             
-            # Emp (Coluna 3)
+            # Emp (Coluna 4, 5)
             if emp:
-                emp_content = f"{emp['nome']} - {emp['h_clean']}"
-                emp_html = f"<td class='nome-col border-left'>{emp_content}</td>"
+                # NOME ALINHADO A ESQUERDA (Perto do Horário - Coluna 4)
+                emp_html = f"<td class='nome-col left-align border-left'>{emp['nome']}</td><td class='horario-col'>{h_clean}</td>"
             else:
-                emp_html = "<td class='nome-col border-left'></td>"
+                emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
             
             rows_html += f"<tr>{op_html}{emp_html}</tr>"
 
-    # Rodapé Folgas - AGORA COM QUEBRA A CADA 2 NOMES
+    # Rodapé Folgas (2 por linha)
     str_folga_op = formatar_lista_folgas_multilinha(lista_op_folga, step=2)
     str_folga_emp = formatar_lista_folgas_multilinha(lista_emp_folga, step=2)
 
@@ -432,9 +420,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .cx-col {{ width: 30px; text-align: center; font-weight: bold; font-size: 13px; }}
-            /* NOME E HORARIO NA MESMA CELULA - CENTRALIZADO */
-            .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
+            .cx-col {{ width: 25px; text-align: center; font-weight: bold; font-size: 13px; }}
+            .horario-col {{ width: 35px; text-align: center; font-weight: bold; font-size: 11px; }}
+            
+            .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
+            
+            /* ALINHAMENTO ESTRATÉGICO PARA ELIMINAR ESPAÇO VISUAL */
+            .right-align {{ text-align: right; padding-right: 5px; }}
+            .left-align {{ text-align: left; padding-left: 5px; }}
+            
             .border-left {{ border-left: 3px solid #000; }}
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
@@ -442,7 +436,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             .footer-container {{ display: flex; border: 2px solid #000; border-top: none; }}
             .footer-box {{ width: 50%; }}
             .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.1; white-space: normal; height: auto; }}
+            .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
             
             .totals-container {{ display: flex; border: 2px solid #000; border-top: none; background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
             .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
@@ -466,7 +460,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 <tr>
                     <th class="cx-col">CX</th>
                     <th>CAIXA</th>
+                    <th class="horario-col">H</th>
                     <th class="border-left">PACOTE</th>
+                    <th class="horario-col">H</th>
                 </tr>
             </thead>
             <tbody>
