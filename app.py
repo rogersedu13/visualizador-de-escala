@@ -22,6 +22,13 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
+# --- CONSTANTES DE CORES (CORREÇÃO DO ERRO DO EXCEL) ---
+H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
+H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
+H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
+H_CINZA    = ["Folga"]
+H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
+
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
@@ -34,6 +41,10 @@ def calcular_minutos(horario_str):
         return h * 60 + m
     except:
         return 9999
+
+# Regras de Negócio
+HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
+HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
@@ -321,7 +332,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
-        # Linha separadora
+        # Linha separadora entre horários
         if rows_html != "":
             rows_html += "<tr class='spacer-row'><td colspan='3'></td></tr>"
 
@@ -329,7 +340,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             # Op (Coluna 1 e 2)
             if op:
                 cx_display = op['cx']
-                # Nome e Horário JUNTOS - SEM ESPAÇO GRANDE
+                # NOME E HORÁRIO JUNTOS
                 op_content = f"{op['nome']} - {op['h_clean']}"
                 op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td>"
             else:
@@ -377,7 +388,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 12px; /* Fonte ajustada para preencher melhor sem estourar */
+                font-size: 11px;
             }}
             
             .header-main {{ 
@@ -386,7 +397,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 padding-bottom: 5px; 
                 margin-bottom: 3px;
             }}
-            .header-dia {{ font-size: 48px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
+            .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
             .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; }}
 
             table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 2px; }}
@@ -414,7 +425,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
             .cx-col {{ width: 30px; text-align: center; font-weight: bold; font-size: 13px; }}
-            /* Nome e Horario centralizados na mesma célula */
+            /* NOME E HORARIO NA MESMA CELULA - CENTRALIZADO */
             .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
             .border-left {{ border-left: 3px solid #000; }}
 
