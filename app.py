@@ -23,7 +23,7 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# --- REGRAS DE HORÁRIOS E CAIXAS ---
+# --- REGRAS DE HORÁRIOS E CAIXAS (Mantidas como referência) ---
 HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
 HORARIOS_LIVRES_TARDE = [
     "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
@@ -250,6 +250,8 @@ def carregar_fiscais() -> pd.DataFrame:
         {"codigo": 1016, "nome": "Amanda", "senha": "5"}
     ])
 
+# --- FUNÇÕES DE IMPRESSÃO ---
+
 def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
@@ -282,7 +284,13 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     """
 
 def gerar_html_diario(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str, dia_semana: str):
-    # CSS para o layout lado a lado
+    # Converte os DataFrames em HTML usando o mesmo estilo base
+    # Mas ajustado para duas colunas
+    
+    # Adicionar classes CSS para controle fino
+    html_ops = df_ops.to_html(index=False, border=0, classes="tabela-escala", justify="center")
+    html_emp = df_emp.to_html(index=False, border=0, classes="tabela-escala", justify="center")
+
     return f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -290,46 +298,97 @@ def gerar_html_diario(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str,
         <meta charset="UTF-8">
         <title>Escala Diária - {data_str}</title>
         <style>
-            body {{ font-family: 'Arial', sans-serif; margin: 0; padding: 20px; background-color: white; }}
-            .header {{ text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-            .header h1 {{ margin: 0; font-size: 24px; text-transform: uppercase; }}
-            .header h2 {{ margin: 5px 0 0 0; font-size: 18px; color: #555; font-weight: normal; }}
+            body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }}
             
-            .container {{ display: flex; justify-content: space-between; gap: 20px; }}
+            /* Container Principal (A4 simulado) */
+            .page-container {{
+                background-color: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 1000px;
+                margin: 0 auto;
+            }}
+
+            /* Cabeçalho */
+            .header {{ text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2c3e50; padding-bottom: 15px; }}
+            .header h1 {{ color: #2c3e50; font-size: 28px; margin: 0; text-transform: uppercase; letter-spacing: 2px; }}
+            .header h2 {{ color: #7f8c8d; font-size: 18px; margin: 5px 0 0 0; font-weight: normal; }}
+
+            /* Layout de Colunas (Lado a Lado) */
+            .row {{ display: flex; justify-content: space-between; gap: 40px; }}
             .column {{ width: 48%; }}
+
+            /* Títulos das Colunas */
+            h3 {{ 
+                background-color: #34495e; 
+                color: white; 
+                padding: 12px; 
+                text-align: center; 
+                margin-top: 0; 
+                margin-bottom: 0; 
+                text-transform: uppercase; 
+                font-size: 16px; 
+                border-top-left-radius: 4px; 
+                border-top-right-radius: 4px;
+                letter-spacing: 1px;
+            }}
+
+            /* Estilo das Tabelas (Mesmo da Semanal) */
+            table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
             
-            h3 {{ background-color: #34495e; color: white; padding: 10px; text-align: center; margin-top: 0; margin-bottom: 0; text-transform: uppercase; font-size: 16px; border-radius: 4px 4px 0 0; }}
+            /* Cabeçalho da Tabela */
+            table.tabela-escala th {{ 
+                background-color: #ecf0f1; 
+                color: #2c3e50; 
+                padding: 10px; 
+                font-size: 13px; 
+                font-weight: bold;
+                border-bottom: 2px solid #bdc3c7;
+                text-transform: uppercase;
+            }}
             
-            table {{ width: 100%; border-collapse: collapse; border: 1px solid #ccc; }}
-            th, td {{ padding: 8px; text-align: center; border-bottom: 1px solid #ddd; font-size: 14px; }}
-            th {{ background-color: #f2f2f2; font-weight: bold; color: #333; }}
-            tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            /* Células */
+            table.tabela-escala td {{ 
+                padding: 10px; 
+                border-bottom: 1px solid #eee; 
+                color: #333; 
+                font-size: 14px; 
+                text-align: center;
+            }}
             
-            .box-num {{ font-weight: bold; font-size: 15px; color: #2c3e50; }}
-            .time {{ font-weight: bold; color: #e67e22; }}
-            
+            table.tabela-escala tr:last-child td {{ border-bottom: none; }}
+            table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
+
+            /* Impressão */
             @media print {{
-                body {{ padding: 0; }}
+                body {{ background-color: white; padding: 0; margin: 0; }}
+                .page-container {{ box-shadow: none; padding: 20px; max-width: 100%; width: 100%; }}
+                h3 {{ background-color: #34495e !important; color: white !important; -webkit-print-color-adjust: exact; }}
+                th {{ background-color: #ecf0f1 !important; -webkit-print-color-adjust: exact; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9 !important; -webkit-print-color-adjust: exact; }}
+                .row {{ display: flex; gap: 20px; }}
                 .column {{ width: 49%; }}
-                h3 {{ background-color: #ccc; color: black; border: 1px solid #000; }}
-                th {{ background-color: #eee !important; -webkit-print-color-adjust: exact; }}
             }}
         </style>
     </head>
     <body>
-        <div class="header">
-            <h1>Escala Diária</h1>
-            <h2>{dia_semana} - {data_str}</h2>
-        </div>
-        
-        <div class="container">
-            <div class="column">
-                <h3>Operadoras</h3>
-                {df_ops.to_html(index=False, border=0, classes='tabela')}
+        <div class="page-container">
+            <div class="header">
+                <h1>Escala Diária</h1>
+                <h2>{dia_semana} - {data_str}</h2>
             </div>
-            <div class="column">
-                <h3>Empacotadores</h3>
-                {df_emp.to_html(index=False, border=0, classes='tabela')}
+            
+            <div class="row">
+                <div class="column">
+                    <h3>Operadoras</h3>
+                    {html_ops}
+                </div>
+                <div class="column">
+                    <h3>Empacotadores</h3>
+                    {html_emp}
+                </div>
             </div>
         </div>
     </body>
@@ -463,6 +522,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
+                # Chave única para o Selectbox (Nome + Data)
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
@@ -482,7 +542,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                st.cache_data.clear() # Limpa o cache para garantir que a próxima edição carregue dados novos
+                st.cache_data.clear() # Limpeza de segurança
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 @st.fragment
@@ -760,7 +820,6 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     # Filtrar pelo dia selecionado
     df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
     
-    # Se não tiver dados no banco para esse dia, cria estrutura vazia
     if df_dia.empty:
         df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
 
@@ -817,6 +876,10 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
         df_ops_print = df_ops_edited[df_ops_edited['horario'] != ""].copy()
         df_emp_print = df_emp_edited[df_emp_edited['horario'] != ""].copy()
         
+        # Renomear para ficar bonito na tabela
+        df_ops_print.rename(columns={"horario": "Horário", "numero_caixa": "Caixa"}, inplace=True)
+        df_emp_print.rename(columns={"horario": "Horário"}, inplace=True)
+
         html_content = gerar_html_diario(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
         
