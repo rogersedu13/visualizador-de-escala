@@ -14,7 +14,6 @@ from itertools import zip_longest
 DIAS_SEMANA_PT = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
 FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Recepção"]
 
-# --- ATUALIZAÇÃO DOS HORÁRIOS (ADICIONADOS 14:45, 15:45, 16:45) ---
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
     "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
@@ -27,7 +26,6 @@ HORARIOS_PADRAO = [
 # --- CONSTANTES DE CORES (PARA O EXCEL) ---
 H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
 H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-# Atualizado H_ROXO com os novos horários da tarde
 H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "14:45 HRS", "15:00 HRS", "15:30 HRS", "15:45 HRS", "16:00 HRS", "16:30 HRS", "16:45 HRS"]
 H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
@@ -375,14 +373,14 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             # Op
             if op:
                 cx_display = op['cx']
-                op_content = f"{op['nome']} - {op['h_clean']}"
+                op_content = f"{op['nome']}" # REMOVIDO H_CLEAN
                 op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td><td class='horario-col'>{op['h_clean']}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
             
             # Emp
             if emp:
-                emp_content = f"{emp['nome']} - {emp['h_clean']}" 
+                emp_content = f"{emp['nome']}" # REMOVIDO H_CLEAN
                 emp_html = f"<td class='nome-col border-left'>{emp_content}</td><td class='horario-col'>{emp['h_clean']}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
@@ -457,7 +455,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
             .cx-col {{ width: 45px; text-align: center; font-weight: bold; font-size: 13px; }}
-            .horario-col {{ width: 40px; text-align: center; font-weight: bold; font-size: 11px; }}
+            .horario-col {{ width: 55px; text-align: center; font-weight: bold; font-size: 11px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
             
@@ -492,9 +490,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 <tr>
                     <th class="cx-col">CX</th>
                     <th>OPERADOR(A)</th>
-                    <th class="horario-col">H</th>
+                    <th class="horario-col">HORÁRIO</th>
                     <th class="border-left">EMPACOTADOR(A)</th>
-                    <th class="horario-col">H</th>
+                    <th class="horario-col">HORÁRIO</th>
                 </tr>
             </thead>
             <tbody>
@@ -1009,7 +1007,7 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
 
     st.markdown("---")
     
-    if st.button("🖨️ Gerar Impressão (Estilo Exato)", type="primary"):
+    if st.button("🖨️ Gerar Impressão", type="primary"):
         # Passa os DataFrames SEM filtrar, a função de impressão fará a separação Folga/Trabalho
         html_content = gerar_html_layout_exato(df_ops_edited, df_emp_edited, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
