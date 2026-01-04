@@ -205,7 +205,6 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- FUNÇÕES DE IMPRESSÃO ---
 
-# Impressão SEMANAL
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
@@ -244,9 +243,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     lista_emp_folga = []
     status_invisivel = ["Ferias", "Afastado(a)", "Atestado", "", None]
 
-    # --- Contadores Inteligentes ---
-    # Manhã: <= 10:30 (inclui 9:30, 10:00)
-    # Tarde: >= 9:30 (inclui 9:30, 10:00)
     c_op_manha = 0; c_self_manha = 0
     c_op_tarde = 0; c_self_tarde = 0
     c_emp_manha = 0; c_emp_tarde = 0
@@ -263,7 +259,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         return 0
     
     df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
-    # Ordena por Caixa (Decrescente)
     df_ops_sorted = df_ops_dia.sort_values(by='rank_cx', ascending=False)
 
     for _, row in df_ops_sorted.iterrows():
@@ -279,11 +274,12 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
         
-        if mins <= 630: # <= 10:30
+        # Lógica Manhã (<= 10:30) / Tarde (>= 09:30)
+        if mins <= 630: 
             if is_self: c_self_manha += 1
             else: c_op_manha += 1
         
-        if mins >= 570: # >= 9:30
+        if mins >= 570: 
             if is_self: c_self_tarde += 1
             else: c_op_tarde += 1
 
@@ -325,39 +321,28 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
-        # Pula linha entre horários (linha fina cinza)
+        # Linha separadora
         if rows_html != "":
-            rows_html += "<tr class='spacer-row'><td colspan='4'></td></tr>"
+            rows_html += "<tr class='spacer-row'><td colspan='3'></td></tr>"
 
         for idx, (op, emp) in enumerate(zipped):
-            # Op
+            # Op (Coluna 1 e 2)
             if op:
                 cx_display = op['cx']
-                # Nome e Horário JUNTOS para garantir proximidade
-                op_content = f"{op['nome']} <span style='float:right; font-weight:normal; margin-left:5px;'>{op['h_clean']}</span>"
+                # Nome e Horário JUNTOS - SEM ESPAÇO GRANDE
+                op_content = f"{op['nome']} - {op['h_clean']}"
                 op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td>"
             
-            # Emp
+            # Emp (Coluna 3)
             if emp:
-                emp_content = f"{emp['nome']} <span style='float:right; font-weight:normal; margin-left:5px;'>{emp['h_clean']}</span>"
+                emp_content = f"{emp['nome']} - {emp['h_clean']}"
                 emp_html = f"<td class='nome-col border-left'>{emp_content}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td>"
             
-            rows_html += f"<tr>{op_html}{emp_html}{emp_html}</tr>".replace(f"{emp_html}{emp_html}", emp_html) # Fix do replace maluco, so precisa de 3 colunas no total (CX, OP, EMP)
-            # Ops, a tabela tem 3 colunas: CX | CAIXA (Nome+H) | PACOTE (Nome+H)
-            
-            rows_html = rows_html.rsplit('</tr>', 1)[0] + f"</tr>" # Limpa gambiarra anterior se houver
-            
-            # Refazendo a linha correta com 3 colunas
-            # Col 1: CX
-            # Col 2: Op (Nome + Time)
-            # Col 3: Emp (Nome + Time)
-            rows_html = rows_html.rsplit('<tr>', 1)[0] # Remove a linha errada acima
             rows_html += f"<tr>{op_html}{emp_html}</tr>"
-
 
     # Rodapé Folgas
     str_folga_op = ", ".join(sorted(lista_op_folga))
@@ -392,7 +377,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 11px;
+                font-size: 12px; /* Fonte ajustada para preencher melhor sem estourar */
             }}
             
             .header-main {{ 
@@ -401,7 +386,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 padding-bottom: 5px; 
                 margin-bottom: 3px;
             }}
-            .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
+            .header-dia {{ font-size: 48px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
             .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; }}
 
             table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 2px; }}
@@ -412,7 +397,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 padding: 3px; 
                 text-transform: uppercase; 
                 border: 1px solid #000; 
-                font-size: 13px;
+                font-size: 14px;
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
@@ -420,7 +405,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             td {{ 
                 padding: 1px 4px; 
                 border: 1px solid #000; 
-                height: 15px; 
+                height: 16px; 
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
@@ -428,19 +413,20 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .cx-col {{ width: 25px; text-align: center; font-weight: bold; font-size: 12px; }}
-            .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; position: relative; }}
+            .cx-col {{ width: 30px; text-align: center; font-weight: bold; font-size: 13px; }}
+            /* Nome e Horario centralizados na mesma célula */
+            .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
             .border-left {{ border-left: 3px solid #000; }}
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
 
             .footer-container {{ display: flex; border: 2px solid #000; border-top: none; }}
             .footer-box {{ width: 50%; }}
-            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 11px; padding: 2px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 9px; padding: 2px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.1; }}
+            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
+            .footer-content {{ background: #eee !important; font-size: 10px; padding: 2px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.1; }}
             
             .totals-container {{ display: flex; border: 2px solid #000; border-top: none; background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
-            .totals-box {{ width: 50%; font-size: 10px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
+            .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
 
             @media print {{
                 body {{ padding: 0; margin: 0; }}
