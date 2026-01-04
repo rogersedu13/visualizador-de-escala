@@ -33,7 +33,7 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 # Para Operadoras (Caixas + Funções de Operadora)
 LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery"] + [str(i) for i in range(1, 18)]
 
-# Para Empacotadores (Tarefas)
+# Para Empacotadores (Tarefas) - REMOVIDO "Apoio Frente"
 LISTA_TAREFAS_EMPACOTADOR = [
     "", "---", 
     "Varrer Estacionamento", 
@@ -41,7 +41,6 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Devolução", 
     "Carrinho", 
     "Varrer Baias",
-    "Apoio Frente",
     "Recolher Cestas"
 ]
 
@@ -287,7 +286,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     def sort_key_caixa(row):
         cx = str(row.get('numero_caixa', '')).strip().upper()
         cx = cx.replace('.0', '')
-        if not cx or cx == 'NAN': return -999
+        if not cx or cx == 'NAN': return -999 # Sem caixa
         if cx == 'SELF': return 1000
         if cx.isdigit(): return int(cx)
         return -50 # Textos
@@ -659,13 +658,11 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 else:
                     key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                     
-                    # Define a lista de opções com base na função
                     if is_operador:
                         lista_opcoes = LISTA_OPCOES_CAIXA
                     else:
                         lista_opcoes = LISTA_TAREFAS_EMPACOTADOR
                     
-                    # Garante que o valor atual esteja na lista (caso tenha sido digitado manualmente ou mudou a lista)
                     if caixa_atual and caixa_atual not in lista_opcoes:
                         lista_opcoes = [caixa_atual] + lista_opcoes
                         
@@ -717,7 +714,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
                 # Adiciona coluna extra para Operador (CX) E Empacotador (Tarefa)
-                # Mas vamos chamar de "EXTRA" no template para ser genérico ou específico
                 if funcao_selecionada == "Operador(a) de Caixa":
                      colunas.append(f"CX_REF_{d_str}")
                 elif funcao_selecionada == "Empacotador(a)":
@@ -768,15 +764,18 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     
-                    worksheet.set_column(0, 0, 30, None)
+                    # AJUSTE DA LARGURA DA COLUNA NOME
+                    # 7 cm ~ 35 unidades do Excel
+                    is_op = (funcao_selecionada == "Operador(a) de Caixa")
+                    is_emp = (funcao_selecionada == "Empacotador(a)")
+                    
+                    width_name = 35 if is_op else 30
+                    worksheet.set_column(0, 0, width_name, None)
                     
                     col_idx = 1
                     last_data_row = len(df_template) 
                     row_total_m = last_data_row + 1
                     row_total_t = last_data_row + 2
-                    
-                    is_op = (funcao_selecionada == "Operador(a) de Caixa")
-                    is_emp = (funcao_selecionada == "Empacotador(a)")
                     
                     for r_idx, row_name in enumerate(df_template['Nome']):
                         row_excel = r_idx + 1
@@ -791,7 +790,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
-                            # Se for Op ou Emp, tem coluna extra
                             if is_op or is_emp:
                                 c_val = info.get('caixa', "")
                                 worksheet.write(row_excel, current_c, c_val, fmt_grid)
@@ -815,11 +813,11 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         col_idx += 1
                         
                         if is_op or is_emp:
-                            header_title = "CX" if is_op else "TAR"
+                            header_title = "CX" if is_op else "TAREFAS"
                             valid_list = '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA)) if is_op else '=Dados!$C$1:$C$' + str(len(LISTA_TAREFAS_EMPACOTADOR))
                             
                             worksheet.write(0, col_idx, header_title, fmt_cx_header)
-                            worksheet.set_column(col_idx, col_idx, 10, None) # Um pouco mais largo para caber "Vasilhame"
+                            worksheet.set_column(col_idx, col_idx, 10, None)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': valid_list})
                             col_idx += 1
                     
