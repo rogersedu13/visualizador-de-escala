@@ -11,7 +11,7 @@ import random
 from itertools import zip_longest 
 
 # --- Constantes da Aplicação ---
-DIAS_SEMANA_PT = ["Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado", "Domingo"]
+DIAS_SEMANA_PT = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
 FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Recepção"]
 
 HORARIOS_PADRAO = [
@@ -25,7 +25,7 @@ HORARIOS_PADRAO = [
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
 
-# --- LÓGICA DE CORTE MANHÃ / TARDE (AUXILIARES) ---
+# --- LÓGICA DE CORTE MANHÃ / TARDE ---
 def calcular_minutos(horario_str):
     if not isinstance(horario_str, str) or "HRS" not in horario_str: return 9999
     try:
@@ -34,15 +34,6 @@ def calcular_minutos(horario_str):
         return h * 60 + m
     except:
         return 9999
-
-# Regras de Negócio
-HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
-CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)]
-
-HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
-HORARIOS_LIVRES_TARDE = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
-HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
@@ -60,7 +51,7 @@ except Exception:
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
 
-# --- Funções Auxiliares de Dados ---
+# --- Funções Auxiliares ---
 
 def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     if pd.isna(data_timestamp): return ""
@@ -246,217 +237,216 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     </html>
     """
 
-# --- NOVA FUNÇÃO: VISUAL EXATO DAS FOTOS COM CÁLCULO E ORDENAÇÃO ---
+# --- NOVA FUNÇÃO: LAYOUT IDÊNTICO ÀS FOTOS + LÓGICA DE GRUPOS ---
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     
-    lista_op_trabalha = []
     lista_op_folga = []
-    
-    lista_emp_trabalha = []
     lista_emp_folga = []
-
-    # Contadores
-    count_op_manha = 0
-    count_op_tarde = 0
-    count_self_manha = 0
-    count_self_tarde = 0
-    count_emp_manha = 0
-    count_emp_tarde = 0
-
     status_invisivel = ["Ferias", "Afastado(a)", "Atestado", "", None]
 
-    # --- PROCESSA OPERADORAS ---
-    # Chave de Ordenação: 
-    # 1. Horário (Cedo -> Tarde)
-    # 2. Caixa (Self -> 17 -> 16... -> 1)
-    def sort_key_op(row):
-        h_str = str(row['horario'])
-        mins = calcular_minutos(h_str)
-        
+    # --- Contadores Inteligentes ---
+    # Manhã: Começa <= 10:30 (Considera 9:30 e 10:00 como Manhã)
+    # Tarde: Começa >= 9:30 (Considera 9:30 e 10:00 como Tarde)
+    # Self Separado
+    c_op_manha = 0; c_self_manha = 0
+    c_op_tarde = 0; c_self_tarde = 0
+    c_emp_manha = 0; c_emp_tarde = 0
+
+    # 1. Separar e Agrupar OPERADORAS
+    ops_agrupado = {} # { "6:50 HRS": [ {cx, nome}, ... ] }
+    
+    # Ordenar por Caixa (Self -> 17 -> 16...)
+    def sort_key_caixa(row):
         cx = str(row.get('numero_caixa', ''))
         cx = cx.replace('.0', '')
-        
-        cx_rank = 0
-        if cx == 'Self': cx_rank = 100
-        elif cx.isdigit(): cx_rank = int(cx)
-        
-        # Retorna tupla: (Minutos ASC, Rank Caixa DESC)
-        # Como queremos Self primeiro e 17 antes de 16, usamos negativo ou invertemos a logica
-        # Vamos usar: Minutos (crescente), Rank (decrescente)
-        return (mins, -cx_rank)
+        if cx == 'Self': return 1000
+        if cx.isdigit(): return int(cx)
+        return 0
     
-    df_ops_dia['sort_temp'] = df_ops_dia.apply(sort_key_op, axis=1)
-    df_ops_sorted = df_ops_dia.sort_values(by='sort_temp')
+    df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
+    df_ops_sorted = df_ops_dia.sort_values(by='rank_cx', ascending=False)
 
     for _, row in df_ops_sorted.iterrows():
-        nome = str(row['nome']).upper()
         horario = str(row['horario'])
-        caixa = str(row.get('numero_caixa', '')).replace('.0', '')
-        mins = calcular_minutos(horario)
-        
-        if horario in status_invisivel or horario == "nan": continue 
-        
-        if "Folga" in horario:
-            lista_op_folga.append(nome)
-        else:
-            h_clean = horario.replace(" HRS", "H").replace(":", ":")
-            lista_op_trabalha.append({'cx': caixa, 'nome': nome, 'horario': h_clean})
-            
-            # Contagem Lógica Excel
-            is_self = (caixa == "Self")
-            if mins <= 600: # Manhã (<= 10:00)
-                if is_self: count_self_manha += 1
-                else: count_op_manha += 1
-            else: # Tarde
-                if is_self: count_self_tarde += 1
-                else: count_op_tarde += 1
-
-    # --- PROCESSA EMPACOTADORES ---
-    # Ordenação: Horário -> Nome
-    def sort_key_emp(row):
-        return (calcular_minutos(str(row['horario'])), str(row['nome']))
-    
-    df_emp_dia['sort_temp'] = df_emp_dia.apply(sort_key_emp, axis=1)
-    df_emp_sorted = df_emp_dia.sort_values(by='sort_temp')
-
-    for _, row in df_emp_sorted.iterrows():
         nome = str(row['nome']).upper()
-        horario = str(row['horario'])
-        mins = calcular_minutos(horario)
+        cx = str(row.get('numero_caixa', '')).replace('.0', '')
         
         if horario in status_invisivel or horario == "nan": continue
+        if "Folga" in horario:
+            lista_op_folga.append(nome)
+            continue
+            
+        # Contagem
+        mins = calcular_minutos(horario)
+        is_self = (cx == "Self")
         
+        # Lógica de "Dobra"
+        if mins <= 630: # <= 10:30 (Manhã)
+            if is_self: c_self_manha += 1
+            else: c_op_manha += 1
+        
+        if mins >= 570: # >= 9:30 (Tarde)
+            if is_self: c_self_tarde += 1
+            else: c_op_tarde += 1
+
+        h_clean = horario.replace(" HRS", "").replace(":", ":")
+        if horario not in ops_agrupado: ops_agrupado[horario] = []
+        ops_agrupado[horario].append({'cx': cx, 'nome': nome})
+
+    # 2. Separar e Agrupar EMPACOTADORES
+    emp_agrupado = {}
+    df_emp_sorted = df_emp_dia.sort_values(by='nome') # Alfabético
+    
+    for _, row in df_emp_sorted.iterrows():
+        horario = str(row['horario'])
+        nome = str(row['nome']).upper()
+        
+        if horario in status_invisivel or horario == "nan": continue
         if "Folga" in horario:
             lista_emp_folga.append(nome)
-        else:
-            h_clean = horario.replace(" HRS", "H")
-            lista_emp_trabalha.append({'nome': nome, 'horario': h_clean})
+            continue
             
-            if mins <= 600: count_emp_manha += 1
-            else: count_emp_tarde += 1
-
-    # --- MONTA AS LINHAS DA TABELA ---
-    rows_html = ""
-    zipped = list(zip_longest(lista_op_trabalha, lista_emp_trabalha, fillvalue=None))
-    
-    for idx, (op, emp) in enumerate(zipped):
-        bg_class = "even" if idx % 2 == 0 else "odd"
+        mins = calcular_minutos(horario)
+        if mins <= 630: c_emp_manha += 1
+        if mins >= 570: c_emp_tarde += 1
         
-        # Coluna Esq
-        if op:
-            cx_display = op['cx'] if op['cx'] else ""
-            op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op['nome']}</td><td class='horario-col'>{op['horario']}</td>"
-        else:
-            op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
-            
-        # Coluna Dir
-        if emp:
-            emp_html = f"<td class='nome-col' style='border-left: 2px solid #000;'>{emp['nome']}</td><td class='horario-col'>{emp['horario']}</td>"
-        else:
-            emp_html = "<td class='nome-col' style='border-left: 2px solid #000;'></td><td class='horario-col'></td>"
-            
-        rows_html += f"<tr class='{bg_class}'>{op_html}{emp_html}</tr>"
+        if horario not in emp_agrupado: emp_agrupado[horario] = []
+        emp_agrupado[horario].append({'nome': nome})
 
-    # Strings Finais
+    # 3. Criar Lista Mestra de Horários (Ordenada)
+    todos_horarios = set(list(ops_agrupado.keys()) + list(emp_agrupado.keys()))
+    horarios_ordenados = sorted(list(todos_horarios), key=lambda x: calcular_minutos(x))
+
+    # 4. Construir HTML Linha a Linha com SEPARADOR
+    rows_html = ""
+    
+    for h_str in horarios_ordenados:
+        h_clean = h_str.replace(" HRS", "H")
+        
+        ops_list = ops_agrupado.get(h_str, [])
+        emp_list = emp_agrupado.get(h_str, [])
+        
+        # Zip para alinhar
+        zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
+        
+        # Adiciona Header do Horário ou Linha Separadora (Visual Clean)
+        # O pedido foi: pular linha na divisão. Vamos fazer uma linha vazia fina.
+        if rows_html != "":
+            rows_html += "<tr class='spacer-row'><td colspan='5'></td></tr>"
+
+        for idx, (op, emp) in enumerate(zipped):
+            # Lado Op
+            if op:
+                cx_display = op['cx']
+                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op['nome']}</td>"
+            else:
+                op_html = "<td class='cx-col'></td><td class='nome-col'></td>"
+            
+            # Horário (Só na primeira linha do bloco ou em todas? Na foto é todas)
+            time_html = f"<td class='horario-col'>{h_clean}</td>"
+
+            # Lado Emp
+            if emp:
+                emp_html = f"<td class='nome-col border-left'>{emp['nome']}</td>"
+            else:
+                emp_html = "<td class='nome-col border-left'></td>"
+            
+            rows_html += f"<tr>{op_html}{time_html}{emp_html}{time_html}</tr>"
+
+    # Rodapé Folgas
     str_folga_op = ", ".join(sorted(lista_op_folga))
     str_folga_emp = ", ".join(sorted(lista_emp_folga))
 
-    # Totais Calculados
-    total_op_manha = count_op_manha + count_self_manha
-    total_op_tarde = count_op_tarde + count_self_tarde
+    # Strings Totais
+    tot_op_m = c_op_manha + c_self_manha
+    tot_op_t = c_op_tarde + c_self_tarde
     
-    str_resumo_manha = f"MANHÃ: {count_op_manha:02d} OP + {count_self_manha} SELF = {total_op_manha:02d} OPERADORES"
-    str_resumo_tarde = f"TARDE: {count_op_tarde:02d} OP + {count_self_tarde} SELF = {total_op_tarde:02d} OPERADORES"
+    resumo_op = f"""
+    <div style='text-align:left; padding-left:10px;'>
+    MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>
+    TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES
+    </div>
+    """
     
-    str_resumo_emp = f"MANHÃ: {count_emp_manha:02d} EMPACOTADORES | TARDE: {count_emp_tarde:02d} EMPACOTADORES"
+    resumo_emp = f"""
+    <div style='text-align:left; padding-left:10px;'>
+    MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>
+    TARDE: {c_emp_tarde:02d} EMPACOTADORES
+    </div>
+    """
 
     return f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
-        <title>Escala {dia_semana}</title>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap');
             
             body {{ 
-                font-family: 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif; 
+                font-family: 'Roboto Condensed', Arial, sans-serif; 
                 color: #000; 
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 13px; /* Fonte levemente menor pra caber nomes grandes */
             }}
             
-            .header-main {{ 
-                text-align: center;
-                border-bottom: 3px solid #000; 
-                padding-bottom: 5px; 
-                margin-bottom: 5px;
-            }}
-            .header-dia {{ font-size: 34px; font-weight: 900; text-transform: uppercase; line-height: 1; }}
-            .header-data {{ font-size: 24px; font-weight: bold; line-height: 1; margin-top: 5px; }}
+            /* Títulos Centralizados */
+            .header-box {{ text-align: center; border-bottom: 3px solid #000; padding-bottom: 5px; margin-bottom: 5px; }}
+            .dia-titulo {{ font-size: 38px; font-weight: 900; text-transform: uppercase; margin: 0; line-height: 1; }}
+            .data-titulo {{ font-size: 24px; font-weight: bold; margin: 5px 0 0 0; }}
 
-            table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; }}
+            /* Tabela Compacta */
+            table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; }} /* FONTE PEQUENA */
             
-            thead th {{ 
+            th {{ 
                 background-color: #222 !important; 
                 color: #fff !important; 
-                padding: 4px; 
+                padding: 3px; 
                 text-transform: uppercase; 
                 border: 1px solid #000; 
-                font-size: 13px;
+                font-size: 12px;
                 -webkit-print-color-adjust: exact; 
             }}
             
-            td {{ padding: 2px 4px; border: 1px solid #000; vertical-align: middle; height: 18px; }}
+            td {{ 
+                padding: 1px 4px; /* Padding Mínimo */
+                border: 1px solid #000; 
+                height: 16px; /* Altura Fixa Pequena */
+                vertical-align: middle;
+                white-space: nowrap; /* Não quebra linha */
+                overflow: hidden;
+            }}
             
-            .cx-col {{ width: 35px; text-align: center; font-weight: bold; font-size: 14px; }}
-            .nome-col {{ text-align: center; font-weight: bold; text-transform: uppercase; white-space: nowrap; overflow: hidden; }}
-            .horario-col {{ width: 80px; text-align: center; font-size: 12px; }}
-            
-            tr.odd {{ background-color: #fff !important; }}
-            tr.even {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
+            .spacer-row td {{ border-left: 2px solid #000; border-right: 2px solid #000; background-color: #888 !important; height: 4px; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .footer-row {{ display: flex; border: 2px solid #000; border-top: none; }}
-            .footer-col {{ width: 50%; }}
-            .footer-header {{ 
-                background-color: #222 !important; color: #fff !important; 
-                text-align: center; font-weight: bold; padding: 4px; font-size: 13px; 
-                border-bottom: 1px solid #000; -webkit-print-color-adjust: exact; 
-            }}
-            .footer-content {{ 
-                padding: 5px; font-size: 11px; text-align: center; 
-                min-height: 40px; background-color: #eee !important; 
-                line-height: 1.3; text-transform: uppercase; -webkit-print-color-adjust: exact; 
-            }}
+            .cx-col {{ width: 30px; text-align: center; font-weight: bold; font-size: 12px; }}
+            .nome-col {{ font-weight: bold; text-transform: uppercase; }}
+            .horario-col {{ width: 50px; text-align: center; font-size: 10px; }}
+            .border-left {{ border-left: 3px solid #000; }}
+
+            /* Rodapé Folgas */
+            .footer-container {{ display: flex; border: 2px solid #000; border-top: none; }}
+            .footer-box {{ width: 50%; }}
+            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
+            .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; }}
             
-            /* Tarja Preta Final com Totais */
-            .total-bar {{
-                background-color: #000 !important;
-                color: #fff !important;
-                text-align: center;
-                padding: 6px;
-                font-weight: bold;
-                font-size: 13px;
-                margin-top: 3px;
-                -webkit-print-color-adjust: exact;
-                line-height: 1.4;
-            }}
+            /* Tarja Totais */
+            .totals-container {{ display: flex; border: 2px solid #000; border-top: none; background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
+            .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; }}
 
             @media print {{
-                body {{ padding: 0; margin: 0; }}
-                thead th {{ background-color: #000 !important; color: #fff !important; }}
-                tr.even {{ background-color: #ccc !important; }}
-                .footer-header {{ background-color: #000 !important; color: #fff !important; }}
-                .total-bar {{ background-color: #000 !important; color: #fff !important; }}
+                body {{ padding: 0; }}
+                th, .footer-header, .totals-container {{ background-color: #000 !important; color: #fff !important; }}
+                .spacer-row td {{ background-color: #888 !important; }}
+                .footer-content {{ background-color: #ddd !important; }}
             }}
         </style>
     </head>
     <body>
-        <div class="header-main">
-            <div class="header-dia">{dia_semana.split('-')[0]}</div>
-            <div class="header-data">DATA: {data_str}</div>
+        <div class="header-box">
+            <div class="dia-titulo">{dia_semana}</div>
+            <div class="data-titulo">DATA: {data_str}</div>
         </div>
 
         <table>
@@ -464,9 +454,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 <tr>
                     <th class="cx-col">CX</th>
                     <th>CAIXA</th>
-                    <th class="horario-col">HORÁRIO</th>
-                    <th>PACOTE</th>
-                    <th class="horario-col">HORÁRIO</th>
+                    <th class="horario-col">H</th>
+                    <th class="border-left">PACOTE</th>
+                    <th class="horario-col">H</th>
                 </tr>
             </thead>
             <tbody>
@@ -474,23 +464,25 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             </tbody>
         </table>
 
-        <div class="footer-row">
-            <div class="footer-col" style="border-right: 2px solid #000;">
+        <div class="footer-container">
+            <div class="footer-box" style="border-right: 2px solid #000;">
                 <div class="footer-header">FOLGAS OPERADORES</div>
                 <div class="footer-content">{str_folga_op}</div>
             </div>
-            <div class="footer-col">
+            <div class="footer-box">
                 <div class="footer-header">FOLGAS EMPACOTADORES</div>
                 <div class="footer-content">{str_folga_emp}</div>
             </div>
         </div>
-        
-        <div class="total-bar">
-            {str_resumo_manha}<br>
-            {str_resumo_tarde}<br>
-            <span style="font-size: 11px; font-weight: normal;">{str_resumo_emp}</span>
-        </div>
 
+        <div class="totals-container">
+            <div class="totals-box" style="border-right: 1px solid #fff;">
+                {resumo_op}
+            </div>
+            <div class="totals-box">
+                {resumo_emp}
+            </div>
+        </div>
     </body>
     </html>
     """
@@ -943,6 +935,7 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     st.markdown("---")
     
     if st.button("🖨️ Gerar Impressão (Estilo Exato)", type="primary"):
+        # Passa os DataFrames SEM filtrar, a função de impressão fará a separação Folga/Trabalho
         html_content = gerar_html_layout_exato(df_ops_edited, df_emp_edited, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
         st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
