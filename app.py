@@ -43,7 +43,9 @@ def calcular_minutos(horario_str):
     except:
         return -1
 
+# Manhã: Tudo que for menor ou igual a 10:00 (Inclui 9:30 e 10:00)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
+# Tarde: Tudo que for maior ou igual a 09:30 (Inclui 9:30 e 10:00)
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
@@ -131,6 +133,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
         
+        # Auto-cadastro
         res_nomes = supabase.table('colaboradores').select('nome').execute()
         nomes_banco = {item['nome'] for item in res_nomes.data}
         
@@ -174,7 +177,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 supabase.rpc('save_escala_dia_final', {
                     'p_nome': nome_limpo, 
                     'p_data': data_banco, 
-                    'p_horario': horario,
+                    'p_horario': horario, 
                     'p_caixa': caixa,
                     'p_semana_id': id_semana
                 }).execute()
@@ -423,7 +426,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- NOVA FUNÇÃO CORRIGIDA 2: ESCALA MÁGICA ---
+# --- ABA ESCALA MÁGICA: FINALIZADA ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
@@ -448,25 +451,12 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         id_semana = semana_info['id']
         data_ini = semana_info['data_inicio']
         
-        # Carrega dados do Banco (Já que os horários estão prontos)
+        # Carrega dados do Banco
         df_full = carregar_escala_semana_por_id(id_semana)
         escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
         
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
         caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
-
-        # Inicializa variáveis de estado
-        if "user_magico_atual" not in st.session_state: st.session_state.user_magico_atual = ""
-        if "sugestao_magica" not in st.session_state: st.session_state.sugestao_magica = {}
-
-        # --- CORREÇÃO: Limpa memória se trocar de usuário ---
-        if st.session_state.user_magico_atual != colaborador:
-            st.session_state.sugestao_magica = {}
-            st.session_state.user_magico_atual = colaborador
-            # Resetar os widgets de interface para forçar a leitura do novo usuário
-            for k in list(st.session_state.keys()):
-                if k.startswith("hm_") or k.startswith("cm_"):
-                    del st.session_state[k]
 
         st.markdown("### 🤖 Gerador Automático")
         col_btn, col_info = st.columns([2, 1])
@@ -499,7 +489,8 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
                         # Se não trabalha, pula
                         if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                            st.session_state[f"cm_{i}"] = "---" if h_str != "" else ""
+                            # Garante que limpa visualmente se antes tinha valor
+                            st.session_state[f"cm_{i}_{colaborador}"] = "---" if h_str != "" else ""
                             continue
 
                         dias_calculados += 1
@@ -540,8 +531,8 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                             else:
                                 escolha = str(random.randint(1, 15))
                         
-                        # --- O PULO DO GATO: Atualiza diretamente o widget ---
-                        st.session_state[f"cm_{i}"] = escolha
+                        # INJETA NO SESSION STATE COM CHAVE ÚNICA DO COLABORADOR
+                        st.session_state[f"cm_{i}_{colaborador}"] = escolha
                         
                         caixas_usados_pelo_user.append(escolha)
                         if escolha in ["16", "17"]: rapido_usado = True
@@ -551,7 +542,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                     else:
                         st.success(f"Distribuído para {dias_calculados} dias!")
                         time.sleep(0.5)
-                        st.rerun() # Atualiza a tela para mostrar os valores injetados
+                        st.rerun()
 
         with st.form("form_escala_magica"):
             cols = st.columns(7)
@@ -562,13 +553,10 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 dia_atual = data_ini + timedelta(days=i)
                 dia_label = f"{DIAS_SEMANA_PT[i]}\n({dia_atual.strftime('%d/%m')})"
                 
-                # Horário (Vem do Banco)
                 horario_banco = horarios_atuais.get(dia_atual, "")
                 
-                # Caixa (Vem do Banco, mas se o robô rodou, st.session_state[cm_i] tem prioridade)
+                # Caixa do Banco
                 caixa_inicial = caixas_atuais.get(dia_atual, "")
-                
-                # IMPORTANTE: Se o robô não rodou agora, usamos o valor do banco no índice
                 idx_c_inicial = 0
                 if caixa_inicial in LISTA_CAIXAS:
                     idx_c_inicial = LISTA_CAIXAS.index(caixa_inicial)
@@ -577,8 +565,8 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 
                 with cols[i]:
                     st.caption(dia_label)
-                    # Horário apenas leitura visual (se quiser mudar, usa a outra aba)
-                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"hm_{i}", disabled=True, label_visibility="collapsed")
+                    # Chave Única: hm_{i}_{colaborador} força atualização ao trocar usuário
+                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"hm_{i}_{colaborador}", disabled=True, label_visibility="collapsed")
                     novos_horarios.append(horario_banco)
                     
                     val_c = None
@@ -586,8 +574,8 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
                         val_c = "---"
                     else:
-                        # O widget key=cm_i vai pegar o valor injetado pelo robô se existir
-                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c_inicial, key=f"cm_{i}", label_visibility="collapsed")
+                        # O Selectbox pega automaticamente o valor injetado no st.session_state se existir
+                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c_inicial, key=f"cm_{i}_{colaborador}", label_visibility="collapsed")
                     novos_caixas.append(val_c)
 
             st.markdown("")
@@ -767,7 +755,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
             if arquivo_upload is not None:
                 if st.button("🚀 Processar e Salvar", type="primary", key="btn_proc_excel"):
-                    # ATUALIZADO: Passando id_semana
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini, id_semana):
                         st.success("Importado com sucesso!"); time.sleep(2); st.cache_data.clear(); st.rerun()
 
