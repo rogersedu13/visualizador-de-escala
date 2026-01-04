@@ -29,8 +29,21 @@ H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "
 H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
-# Lista de Caixas
-LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
+# --- LISTAS ESPECÍFICAS POR FUNÇÃO ---
+# Para Operadoras (Caixas + Funções de Operadora)
+LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery"] + [str(i) for i in range(1, 18)]
+
+# Para Empacotadores (Tarefas)
+LISTA_TAREFAS_EMPACOTADOR = [
+    "", "---", 
+    "Varrer Estacionamento", 
+    "Vasilhame", 
+    "Devolução", 
+    "Carrinho", 
+    "Varrer Baias",
+    "Apoio Frente",
+    "Recolher Cestas"
+]
 
 # --- LÓGICA DE CORTE MANHÃ / TARDE ---
 def calcular_minutos(horario_str):
@@ -160,11 +173,13 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 caixa = None
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
+                    # Verifica a próxima coluna para ver se tem tarefa/caixa
                     if col_idx + 1 < len(df_excel.columns):
                         val_caixa = row.iloc[col_idx + 1]
                         if not pd.isna(val_caixa):
                             caixa = str(val_caixa).strip().replace(".0", "")
                 except: caixa = None
+                
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 supabase.rpc('save_escala_dia_final', {'p_nome': nome_limpo, 'p_data': data_banco, 'p_horario': horario, 'p_caixa': caixa, 'p_semana_id': id_semana}).execute()
             if index % 5 == 0: barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
@@ -268,13 +283,14 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     # --- PROCESSA OPERADORAS ---
     ops_agrupado = {} 
     
-    # Ordem: Self -> 17 -> 16...
+    # Ordem: Self -> 17 -> 16... -> Recepção/Delivery
     def sort_key_caixa(row):
-        cx = str(row.get('numero_caixa', ''))
+        cx = str(row.get('numero_caixa', '')).strip().upper()
         cx = cx.replace('.0', '')
-        if cx == 'Self': return 1000
+        if not cx or cx == 'NAN': return -999
+        if cx == 'SELF': return 1000
         if cx.isdigit(): return int(cx)
-        return 0
+        return -50 # Textos
     
     df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
     df_ops_sorted = df_ops_dia.sort_values(by='rank_cx', ascending=False)
@@ -295,7 +311,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         if mins <= 630: 
             if is_self: c_self_manha += 1
             else: c_op_manha += 1
-        
         if mins >= 570: 
             if is_self: c_self_tarde += 1
             else: c_op_tarde += 1
@@ -311,7 +326,10 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
         nome = str(row['nome']).upper()
-        
+        # Tarefa vinda da coluna "numero_caixa"
+        tarefa = str(row.get('numero_caixa', '')).replace('.0', '').strip()
+        if tarefa == 'nan': tarefa = ""
+
         if horario in status_invisivel or horario == "nan": continue
         if "Folga" in horario:
             lista_emp_folga.append(nome)
@@ -323,7 +341,13 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
         if horario not in emp_agrupado: emp_agrupado[horario] = []
-        emp_agrupado[horario].append({'nome': nome, 'h_clean': h_clean})
+        
+        # Formata com a Tarefa se houver
+        nome_display = nome
+        if tarefa and tarefa != "nan" and tarefa != "":
+            nome_display = f"{nome} <span style='font-size:0.85em'>({tarefa})</span>"
+            
+        emp_agrupado[horario].append({'nome': nome_display, 'h_clean': h_clean})
 
     # --- CRIA LISTA DE HORÁRIOS ÚNICOS E ORDENADOS ---
     todos_horarios = set(list(ops_agrupado.keys()) + list(emp_agrupado.keys()))
@@ -340,30 +364,30 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
-        # LINHA SEPARADORA FINA
         if rows_html != "":
             rows_html += "<tr class='spacer-row'><td colspan='5'></td></tr>"
 
         for idx, (op, emp) in enumerate(zipped):
-            # Op (Colunas 1, 2, 3)
+            # Op
             if op:
-                op_html = f"<td class='cx-col'>{op['cx']}</td><td class='nome-col'>{op['nome']}</td><td class='horario-col'>{op['h_clean']}</td>"
+                cx_display = op['cx']
+                op_content = f"{op['nome']} - {op['h_clean']}"
+                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td><td class='horario-col'>{op['h_clean']}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
             
-            # Emp (Colunas 4, 5)
+            # Emp
             if emp:
-                emp_html = f"<td class='nome-col border-left'>{emp['nome']}</td><td class='horario-col'>{emp['h_clean']}</td>"
+                emp_content = f"{emp['nome']} - {emp['h_clean']}" # Nome ja tem a tarefa
+                emp_html = f"<td class='nome-col border-left'>{emp_content}</td><td class='horario-col'>{emp['h_clean']}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
             
             rows_html += f"<tr>{op_html}{emp_html}</tr>"
 
-    # Rodapé Folgas (2 por linha)
     str_folga_op = formatar_lista_folgas_multilinha(lista_op_folga, step=2)
     str_folga_emp = formatar_lista_folgas_multilinha(lista_emp_folga, step=2)
 
-    # Totais
     tot_op_m = c_op_manha + c_self_manha
     tot_op_t = c_op_tarde + c_self_tarde
     
@@ -629,14 +653,28 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 novos_horarios.append(val_h)
                 
                 val_c = None
-                if is_operador:
-                    if val_h in ["Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                        st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
-                        val_c = "---"
+                if val_h in ["Folga", "Ferias", "Atestado", "Afastado(a)"]:
+                    st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
+                    val_c = "---"
+                else:
+                    key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
+                    
+                    # Define a lista de opções com base na função
+                    if is_operador:
+                        lista_opcoes = LISTA_OPCOES_CAIXA
                     else:
-                        key_c = f"c_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
-                        idx_c = LISTA_CAIXAS.index(caixa_atual) if caixa_atual in LISTA_CAIXAS else 0
-                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=key_c, label_visibility="collapsed")
+                        lista_opcoes = LISTA_TAREFAS_EMPACOTADOR
+                    
+                    # Garante que o valor atual esteja na lista (caso tenha sido digitado manualmente ou mudou a lista)
+                    if caixa_atual and caixa_atual not in lista_opcoes:
+                        lista_opcoes = [caixa_atual] + lista_opcoes
+                        
+                    idx_c = 0
+                    if caixa_atual in lista_opcoes:
+                        idx_c = lista_opcoes.index(caixa_atual)
+                    
+                    label_c = "C" if is_operador else "T"
+                    val_c = st.selectbox(label_c, lista_opcoes, index=idx_c, key=key_c, label_visibility="collapsed")
                 
                 novos_caixas.append(val_c)
         
@@ -678,8 +716,12 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
+                # Adiciona coluna extra para Operador (CX) E Empacotador (Tarefa)
+                # Mas vamos chamar de "EXTRA" no template para ser genérico ou específico
                 if funcao_selecionada == "Operador(a) de Caixa":
-                    colunas.append(f"CX_REF_{d_str}")
+                     colunas.append(f"CX_REF_{d_str}")
+                elif funcao_selecionada == "Empacotador(a)":
+                     colunas.append(f"TAREFA_REF_{d_str}")
 
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
@@ -719,7 +761,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
-                    ws_data.write_column('B1', LISTA_CAIXAS)
+                    # Escreve as duas listas para validação
+                    ws_data.write_column('B1', LISTA_OPCOES_CAIXA)
+                    ws_data.write_column('C1', LISTA_TAREFAS_EMPACOTADOR)
                     
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
@@ -727,9 +771,12 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.set_column(0, 0, 30, None)
                     
                     col_idx = 1
-                    last_data_row = len(df_template) # Ex: 10 nomes
+                    last_data_row = len(df_template) 
                     row_total_m = last_data_row + 1
                     row_total_t = last_data_row + 2
+                    
+                    is_op = (funcao_selecionada == "Operador(a) de Caixa")
+                    is_emp = (funcao_selecionada == "Empacotador(a)")
                     
                     for r_idx, row_name in enumerate(df_template['Nome']):
                         row_excel = r_idx + 1
@@ -744,7 +791,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
-                            if funcao_selecionada == "Operador(a) de Caixa":
+                            # Se for Op ou Emp, tem coluna extra
+                            if is_op or is_emp:
                                 c_val = info.get('caixa', "")
                                 worksheet.write(row_excel, current_c, c_val, fmt_grid)
                                 current_c += 1
@@ -766,10 +814,13 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
 
                         col_idx += 1
                         
-                        if funcao_selecionada == "Operador(a) de Caixa":
-                            worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            worksheet.set_column(col_idx, col_idx, 5, None)
-                            worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
+                        if is_op or is_emp:
+                            header_title = "CX" if is_op else "TAR"
+                            valid_list = '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA)) if is_op else '=Dados!$C$1:$C$' + str(len(LISTA_TAREFAS_EMPACOTADOR))
+                            
+                            worksheet.write(0, col_idx, header_title, fmt_cx_header)
+                            worksheet.set_column(col_idx, col_idx, 10, None) # Um pouco mais largo para caber "Vasilhame"
+                            worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': valid_list})
                             col_idx += 1
                     
                     # --- TOTAIS ---
@@ -779,7 +830,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.write(row_total_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_total_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    step = 2 if funcao_selecionada == "Operador(a) de Caixa" else 1
+                    step = 2 if (is_op or is_emp) else 1
+                    
                     def num_to_col(n):
                         s = ""
                         while n >= 0:
@@ -921,7 +973,7 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
 
     df_ops_final = df_ops_base.merge(df_dia[['nome', 'horario', 'numero_caixa']], on='nome', how='left').fillna("")
-    df_emp_final = df_emp_base.merge(df_dia[['nome', 'horario']], on='nome', how='left').fillna("")
+    df_emp_final = df_emp_base.merge(df_dia[['nome', 'horario', 'numero_caixa']], on='nome', how='left').fillna("")
 
     df_ops_final = df_ops_final.sort_values('nome')
     df_emp_final = df_emp_final.sort_values('nome')
@@ -937,8 +989,8 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     with c2:
         st.markdown("### 📦 Empacotadores")
         df_emp_edited = st.data_editor(
-            df_emp_final[['nome', 'horario']],
-            column_config={"nome": "Nome", "horario": "Horário"},
+            df_emp_final[['nome', 'horario', 'numero_caixa']],
+            column_config={"nome": "Nome", "horario": "Horário", "numero_caixa": "Tarefa/Obs"},
             hide_index=True, use_container_width=True, key=f"editor_emp_{data_selecionada}"
         )
 
