@@ -23,6 +23,24 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
+# --- REGRAS DE HORÁRIOS E CAIXAS ---
+# Horários "Livres" que permitem sentar nos Especiais
+HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
+HORARIOS_LIVRES_TARDE = [
+    "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
+    "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"
+]
+HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
+
+# Horários Restritos (Só podem sentar nos caixas 02 a 10)
+HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
+
+# Caixas Especiais (Exigem cobertura Manhã E Tarde + Aceitam vizinhos iguais)
+CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
+
+# Caixas para o "Miolo" (Horários Restritos)
+CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
+
 # Grupos de Cores para o Excel
 H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
 H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
@@ -174,7 +192,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 supabase.rpc('save_escala_dia_final', {
                     'p_nome': nome_limpo, 
                     'p_data': data_banco, 
-                    'p_horario': horario,
+                    'p_horario': horario, 
                     'p_caixa': caixa,
                     'p_semana_id': id_semana
                 }).execute()
@@ -423,11 +441,11 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- NOVA FUNÇÃO CORRIGIDA 3: ESCALA MÁGICA COMPLETA ---
+# --- ABA ESCALA MÁGICA: FINALIZADA COM NOVAS REGRAS ESTRITAS ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
-    st.info("Esta aba usa regras automáticas para distribuir os caixas. Certifique-se de que os horários já foram salvos anteriormente.")
+    st.info("Esta aba usa regras automáticas (Horários Livres/Restritos, Vizinhos e Rotação) para distribuir os caixas.")
 
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
@@ -460,13 +478,11 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         if "week_magico_atual" not in st.session_state: st.session_state.week_magico_atual = ""
         if "sugestao_magica" not in st.session_state: st.session_state.sugestao_magica = {}
 
-        # --- CORREÇÃO: Limpa memória se trocar de usuário OU de semana ---
+        # --- Limpa memória se trocar de usuário OU de semana ---
         if st.session_state.user_magico_atual != colaborador or st.session_state.week_magico_atual != id_semana:
             st.session_state.sugestao_magica = {}
             st.session_state.user_magico_atual = colaborador
             st.session_state.week_magico_atual = id_semana
-            
-            # Resetar os widgets de interface para forçar a leitura do novo usuário/semana
             for k in list(st.session_state.keys()):
                 if k.startswith("hm_") or k.startswith("cm_"):
                     del st.session_state[k]
@@ -476,8 +492,8 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         with col_btn:
             if st.button("🎲 Gerar Distribuição para esta pessoa", type="primary", use_container_width=True):
                 with st.spinner("Analisando Banco de Dados..."):
-                    # 1. Vizinhos (Ocupação Global)
-                    ocupacao_semana = {} 
+                    # 1. Carrega Mapa de Ocupação Detalhado (Quem está onde e em qual horário)
+                    ocupacao_semana = {} # {data: {caixa: horario}}
                     try:
                         dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
                         df_ocup = pd.DataFrame(dados_semana_raw.data)
@@ -486,14 +502,17 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                             for _, r in df_ocup.iterrows():
                                 d_temp = pd.to_datetime(r['data']).date()
                                 cx_temp = str(r['numero_caixa']).strip()
+                                h_temp = str(r['horario']).strip()
                                 if cx_temp and cx_temp.isdigit():
-                                    if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = []
-                                    ocupacao_semana[d_temp].append(int(cx_temp))
+                                    if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
+                                    ocupacao_semana[d_temp][int(cx_temp)] = h_temp
+                                elif cx_temp == "Self": # Trata Self como número especial
+                                    if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
+                                    ocupacao_semana[d_temp][999] = h_temp
                     except Exception as e:
                         print(f"Erro vizinhos: {e}")
 
                     caixas_usados_pelo_user = []
-                    rapido_usado = False
                     dias_calculados = 0
 
                     for i in range(7):
@@ -502,61 +521,128 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
                         # Se não trabalha, pula
                         if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                            # CORREÇÃO: Usa ID da Semana na chave
                             st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = "---" if h_str != "" else ""
                             continue
 
                         dias_calculados += 1
 
-                        # --- LÓGICA ---
-                        caixas_proibidos = set()
-                        ocupados_hoje = ocupacao_semana.get(dia_calc, [])
-                        for oc in ocupados_hoje:
-                            caixas_proibidos.add(str(oc))     
-                            caixas_proibidos.add(str(oc - 1)) 
-                            caixas_proibidos.add(str(oc + 1)) 
-
-                        minutos = calcular_minutos(h_str)
-                        permite_rapido = False
-                        if minutos > 0:
-                            if minutos <= 480 or minutos >= 660: # <= 8:00 ou >= 11:00
-                                permite_rapido = True
-
+                        # --- DEFINIÇÃO DE POOL (OPÇÕES VÁLIDAS) ---
                         pool = []
-                        for n in range(1, 16):
-                            s_n = str(n)
-                            if s_n not in caixas_proibidos and s_n not in caixas_usados_pelo_user:
-                                pool.append(s_n)
-                        
-                        if permite_rapido and not rapido_usado:
-                            for r in [16, 17]:
-                                s_r = str(r)
-                                if s_r not in caixas_proibidos and s_r not in caixas_usados_pelo_user:
-                                    pool.append(s_r)
+                        eh_domingo = (dia_calc.weekday() == 6)
 
-                        escolha = ""
-                        if pool:
-                            escolha = random.choice(pool)
+                        # Regra 1: Horários Restritos (9:00 - 10:30) vs Livres
+                        if h_str in HORARIOS_RESTRITOS:
+                            candidatos = CAIXAS_RESTRITOS_LISTA
                         else:
-                            pool_fallback = [str(x) for x in range(1, 16) if str(x) not in caixas_proibidos]
-                            if pool_fallback:
-                                escolha = random.choice(pool_fallback)
-                            else:
-                                escolha = str(random.randint(1, 15))
+                            candidatos = CAIXAS_ESPECIAIS_LISTA + [str(x) for x in range(1, 18) if str(x) not in CAIXAS_ESPECIAIS_LISTA]
+
+                        ocupados_hoje_map = ocupacao_semana.get(dia_calc, {})
                         
-                        # --- O PULO DO GATO: Atualiza diretamente o widget ---
-                        # Chave inclui ID SEMANA para garantir uniqueness
+                        prioridade_especial = []
+                        prioridade_normal = []
+
+                        # -- VERIFICAÇÃO DE COBERTURA OBRIGATÓRIA (CRÍTICO) --
+                        needs_morning = []
+                        needs_afternoon = []
+                        
+                        # Verifica quais especiais estão VAZIOS
+                        for cx_esp in CAIXAS_ESPECIAIS_LISTA:
+                            c_int = int(cx_esp) if cx_esp != "Self" else 999
+                            
+                            tem_manha = False
+                            tem_tarde = False
+                            
+                            # Verifica se já tem alguém lá no banco
+                            horario_la = ocupados_hoje_map.get(c_int)
+                            if horario_la:
+                                if horario_la in HORARIOS_LIVRES_MANHA: tem_manha = True
+                                if horario_la in HORARIOS_LIVRES_TARDE: tem_tarde = True
+                            
+                            # Se não tem, marca como Necessidade
+                            if not tem_manha: needs_morning.append(cx_esp)
+                            if not tem_tarde: needs_afternoon.append(cx_esp)
+
+                        # Agora classifica a operadora atual
+                        sou_manha = h_str in HORARIOS_LIVRES_MANHA
+                        sou_tarde = h_str in HORARIOS_LIVRES_TARDE
+
+                        for c_cand in candidatos:
+                            # 1. Rotação Semanal
+                            if c_cand in caixas_usados_pelo_user: continue
+                            
+                            # 2. Exclusão Mútua 16/17
+                            if c_cand == "16" and "17" in caixas_usados_pelo_user: continue
+                            if c_cand == "17" and "16" in caixas_usados_pelo_user: continue
+
+                            # 3. Ocupação HOJE (Não pode sentar em cima de ninguém)
+                            c_int = int(c_cand) if c_cand != "Self" else 999
+                            if c_int in ocupados_hoje_map: continue # Já tem gente
+
+                            # 4. Regra de Vizinhança
+                            # Só aplica se NÃO for Domingo e NÃO for Caixa Especial
+                            if not eh_domingo and c_cand not in CAIXAS_ESPECIAIS_LISTA:
+                                viz_esq = ocupados_hoje_map.get(c_int - 1)
+                                viz_dir = ocupados_hoje_map.get(c_int + 1)
+                                
+                                # Bloqueia se vizinho tiver MESMO horário
+                                if viz_esq and viz_esq == h_str: continue
+                                if viz_dir and viz_dir == h_str: continue
+
+                            # 5. O SEGREDO: Prioridade Máxima para Cobertura
+                            eh_prioridade_maxima = False
+                            if c_cand in CAIXAS_ESPECIAIS_LISTA:
+                                if sou_manha and c_cand in needs_morning: eh_prioridade_maxima = True
+                                if sou_tarde and c_cand in needs_afternoon: eh_prioridade_maxima = True
+                            
+                            if eh_prioridade_maxima:
+                                prioridade_especial.append(c_cand) # Vai furar fila
+                            elif c_cand in CAIXAS_ESPECIAIS_LISTA and h_str in HORARIOS_LIVRES_TOTAL:
+                                # É especial e eu sou livre, mas não é crítico (já tem gente). Põe na fila normal.
+                                prioridade_normal.append(c_cand) 
+                            elif c_cand not in CAIXAS_ESPECIAIS_LISTA:
+                                prioridade_normal.append(c_cand)
+
+                        # --- ESCOLHA DO CAIXA ---
+                        escolha = ""
+                        
+                        # Se tem prioridade CRÍTICA (buraco no especial), pega um deles
+                        if prioridade_especial:
+                             escolha = random.choice(prioridade_especial)
+                        
+                        # Se não, pega qualquer um válido
+                        elif prioridade_normal:
+                             escolha = random.choice(prioridade_normal)
+                        
+                        else:
+                            # Fallback: Se tudo bloqueado, relaxa a regra de rotação
+                            pool_fallback = []
+                            for c_cand in candidatos:
+                                c_int = int(c_cand) if c_cand != "Self" else 999
+                                if c_int in ocupados_hoje_map: continue # Ocupado jamais
+                                
+                                # Verifica vizinho de novo
+                                if not eh_domingo and c_cand not in CAIXAS_ESPECIAIS_LISTA:
+                                    viz_esq = ocupados_hoje_map.get(c_int - 1)
+                                    viz_dir = ocupados_hoje_map.get(c_int + 1)
+                                    if viz_esq == h_str or viz_dir == h_str: continue
+                                
+                                # Regra Especial de Horário
+                                if c_cand in CAIXAS_ESPECIAIS_LISTA and h_str not in HORARIOS_LIVRES_TOTAL: continue
+
+                                pool_fallback.append(c_cand)
+                            
+                            if pool_fallback: escolha = random.choice(pool_fallback)
+                            else: escolha = str(random.randint(1, 15)) # Desespero
+
                         st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = escolha
-                        
                         caixas_usados_pelo_user.append(escolha)
-                        if escolha in ["16", "17"]: rapido_usado = True
                     
                     if dias_calculados == 0:
                         st.warning("Não encontrei horários no banco. Salve a escala primeiro.")
                     else:
                         st.success(f"Distribuído para {dias_calculados} dias!")
                         time.sleep(0.5)
-                        st.rerun() # Atualiza a tela para mostrar os valores injetados
+                        st.rerun()
 
         with st.form("form_escala_magica"):
             cols = st.columns(7)
@@ -567,13 +653,10 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 dia_atual = data_ini + timedelta(days=i)
                 dia_label = f"{DIAS_SEMANA_PT[i]}\n({dia_atual.strftime('%d/%m')})"
                 
-                # Horário (Vem do Banco)
                 horario_banco = horarios_atuais.get(dia_atual, "")
                 
-                # Caixa (Vem do Banco, mas se o robô rodou, st.session_state[cm_i] tem prioridade)
+                # Caixa do Banco
                 caixa_inicial = caixas_atuais.get(dia_atual, "")
-                
-                # IMPORTANTE: Se o robô não rodou agora, usamos o valor do banco no índice
                 idx_c_inicial = 0
                 if caixa_inicial in LISTA_CAIXAS:
                     idx_c_inicial = LISTA_CAIXAS.index(caixa_inicial)
@@ -582,7 +665,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 
                 with cols[i]:
                     st.caption(dia_label)
-                    # Chave Única: hm_{i}_{colaborador}_{id_semana} força atualização ao trocar usuário OU semana
                     st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"hm_{i}_{colaborador}_{id_semana}", disabled=True, label_visibility="collapsed")
                     novos_horarios.append(horario_banco)
                     
@@ -591,7 +673,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
                         val_c = "---"
                     else:
-                        # O widget key=cm_i vai pegar o valor injetado pelo robô se existir
                         val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c_inicial, key=f"cm_{i}_{colaborador}_{id_semana}", label_visibility="collapsed")
                     novos_caixas.append(val_c)
 
