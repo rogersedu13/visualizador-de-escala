@@ -423,7 +423,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- NOVA FUNÇÃO CORRIGIDA: ESCALA MÁGICA COM FORÇA DE ATUALIZAÇÃO ---
+# --- NOVA FUNÇÃO CORRIGIDA 2: ESCALA MÁGICA ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
@@ -455,9 +455,18 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
         caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
 
+        # Inicializa variáveis de estado
         if "user_magico_atual" not in st.session_state: st.session_state.user_magico_atual = ""
+        if "sugestao_magica" not in st.session_state: st.session_state.sugestao_magica = {}
+
+        # --- CORREÇÃO: Limpa memória se trocar de usuário ---
         if st.session_state.user_magico_atual != colaborador:
+            st.session_state.sugestao_magica = {}
             st.session_state.user_magico_atual = colaborador
+            # Resetar os widgets de interface para forçar a leitura do novo usuário
+            for k in list(st.session_state.keys()):
+                if k.startswith("hm_") or k.startswith("cm_"):
+                    del st.session_state[k]
 
         st.markdown("### 🤖 Gerador Automático")
         col_btn, col_info = st.columns([2, 1])
@@ -490,7 +499,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
                         # Se não trabalha, pula
                         if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                            # Garante que visualmente fique limpo (ou ---)
                             st.session_state[f"cm_{i}"] = "---" if h_str != "" else ""
                             continue
 
@@ -715,6 +723,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
+                    # --- TOTAIS ---
                     mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
@@ -758,6 +767,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
             if arquivo_upload is not None:
                 if st.button("🚀 Processar e Salvar", type="primary", key="btn_proc_excel"):
+                    # ATUALIZADO: Passando id_semana
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini, id_semana):
                         st.success("Importado com sucesso!"); time.sleep(2); st.cache_data.clear(); st.rerun()
 
