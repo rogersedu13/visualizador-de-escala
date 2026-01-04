@@ -8,11 +8,10 @@ import time
 import base64
 import io
 import random
+from itertools import zip_longest # Para juntar as duas listas na impressão
 
 # --- Constantes da Aplicação ---
-DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
-DIAS_SEMANA_FULL = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
-
+DIAS_SEMANA_PT = ["Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado", "Domingo"]
 FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Recepção"]
 
 HORARIOS_PADRAO = [
@@ -23,34 +22,17 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# --- REGRAS DE HORÁRIOS E CAIXAS (Mantidas como referência) ---
+# --- REGRAS (Mantidas) ---
 HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
 HORARIOS_LIVRES_TARDE = [
     "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
     "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"
 ]
 HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
-
 HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
-CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
-
-# Lista de Caixas
+CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)]
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
-
-# --- LÓGICA DE CORTE MANHÃ / TARDE ---
-def calcular_minutos(horario_str):
-    if "HRS" not in horario_str: return -1
-    try:
-        time_part = horario_str.split(' ')[0]
-        h, m = map(int, time_part.split(':'))
-        return h * 60 + m
-    except:
-        return -1
-
-HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
-HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Frente de Caixa", page_icon="📅", layout="wide", initial_sidebar_state="expanded")
@@ -126,7 +108,7 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
             supabase.rpc('save_escala_dia_final', {
                 'p_nome': nome.strip(), 
                 'p_data': data_dia.strftime('%Y-%m-%d'), 
-                'p_horario': horario,
+                'p_horario': horario, 
                 'p_caixa': cx,
                 'p_semana_id': id_semana
             }).execute()
@@ -136,35 +118,26 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
 def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id_semana: int) -> bool:
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
-        
         res_nomes = supabase.table('colaboradores').select('nome').execute()
         nomes_banco = {item['nome'] for item in res_nomes.data}
-        
         barra = st.progress(0, text="Processando arquivo...")
         total_linhas = len(df_excel)
-        
         for index, row in df_excel.iterrows():
             nome = row.get('Nome')
             if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome) or "Manhã" in str(nome) or "Tarde" in str(nome): continue
-            
             nome_limpo = str(nome).strip()
-
             if nome_limpo not in nomes_banco:
                 try:
                     supabase.table('colaboradores').insert({'nome': nome_limpo, 'funcao': 'Operador(a) de Caixa'}).execute()
                     nomes_banco.add(nome_limpo)
-                except Exception as e:
-                    print(f"Erro ao auto-cadastrar {nome_limpo}: {e}")
-
+                except Exception as e: print(f"Erro auto-cadastro: {e}")
             for i in range(7):
                 data_str_header = datas_reais[i]
-                
                 horario = ""
                 if data_str_header in df_excel.columns:
                     horario = row[data_str_header]
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
-                
                 caixa = None
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
@@ -172,19 +145,9 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                         val_caixa = row.iloc[col_idx + 1]
                         if not pd.isna(val_caixa):
                             caixa = str(val_caixa).strip().replace(".0", "")
-                except:
-                    caixa = None
-                
+                except: caixa = None
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
-                
-                supabase.rpc('save_escala_dia_final', {
-                    'p_nome': nome_limpo, 
-                    'p_data': data_banco, 
-                    'p_horario': horario, 
-                    'p_caixa': caixa,
-                    'p_semana_id': id_semana
-                }).execute()
-            
+                supabase.rpc('save_escala_dia_final', {'p_nome': nome_limpo, 'p_data': data_banco, 'p_horario': horario, 'p_caixa': caixa, 'p_semana_id': id_semana}).execute()
             if index % 5 == 0: barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
         barra.empty()
         return True
@@ -196,19 +159,12 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
         res = supabase.table('semanas').select('id').eq('data_inicio', data_inicio.strftime('%Y-%m-%d')).execute()
         if not res.data: return False
         new_id = res.data[0]['id']
-
         df_colabs = carregar_colaboradores()
         if not df_colabs.empty:
             for nome in df_colabs['nome']:
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    supabase.rpc('save_escala_dia_final', {
-                        'p_nome': nome, 
-                        'p_data': d.strftime('%Y-%m-%d'), 
-                        'p_horario': '', 
-                        'p_caixa': None,
-                        'p_semana_id': new_id
-                    }).execute()
+                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None, 'p_semana_id': new_id}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -223,9 +179,7 @@ def adicionar_colaborador(nome: str, funcao: str) -> bool:
     try:
         supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao}).execute()
         return True
-    except Exception as e: 
-        st.error(f"Erro ao adicionar: {e}")
-        return False
+    except Exception as e: st.error(f"Erro ao adicionar: {e}"); return False
 
 def remover_colaboradores(lista_nomes: list) -> bool:
     try:
@@ -236,9 +190,7 @@ def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
     try:
         supabase.table('colaboradores').update({'funcao': nova_funcao}).eq('nome', nome).execute()
         return True
-    except Exception as e: 
-        st.error(f"Erro: {e}")
-        return False
+    except Exception as e: st.error(f"Erro: {e}"); return False
 
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
@@ -252,6 +204,7 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- FUNÇÕES DE IMPRESSÃO ---
 
+# Impressão SEMANAL (HTML Colorido) - Mantida para a aba de visão pública
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
@@ -283,96 +236,177 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     </html>
     """
 
-# NOVA FUNÇÃO: Gera o HTML no estilo "Foto da Parede" (Lista Simples)
-def gerar_html_diario_estilo_foto(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str, dia_semana: str):
+# --- NOVA FUNÇÃO: VISUAL EXATO DAS FOTOS (PRETO/BRANCO, LISTRADO, RODAPÉ DE FOLGA) ---
+def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     
-    # 1. Constrói a lista de Operadoras (HTML cru, sem tabela)
-    html_ops_list = ""
-    for _, row in df_ops.iterrows():
-        nome = row['nome']
-        horario = row['horario']
-        caixa = row.get('numero_caixa', '')
+    # 1. Separar quem Trabalha vs Quem Folga (Baseado no Status)
+    lista_op_trabalha = []
+    lista_op_folga = []
+    
+    lista_emp_trabalha = []
+    lista_emp_folga = []
 
-        # Formato: NOME - HORARIO [ - CAIXA]
-        linha = f"<strong>{nome}</strong> - {horario}"
-        if caixa and caixa.strip() != "":
-                linha += f" - <strong>CX {caixa}</strong>"
+    # Lista de status que devem SUMIR DA ESCALA (Não aparecem nem na folga)
+    status_invisivel = ["Ferias", "Afastado(a)", "Atestado", ""]
+
+    # Processa Operadoras
+    # Ordenar por Caixa (Decrescente 17 -> 1) para ficar igual a foto
+    def sort_key_caixa(row):
+        cx = str(row.get('numero_caixa', ''))
+        if cx.isdigit(): return int(cx)
+        if cx == 'Self': return 999
+        if cx == 'Delivery': return -1
+        return 0
+    
+    df_ops_sorted = df_ops_dia.sort_values(by=['numero_caixa'], key=lambda x: x.map(lambda v: 999 if v=='Self' else (int(v) if str(v).isdigit() else 0)), ascending=False)
+
+    for _, row in df_ops_sorted.iterrows():
+        nome = str(row['nome']).upper()
+        horario = str(row['horario'])
+        caixa = str(row.get('numero_caixa', ''))
         
-        html_ops_list += f"<div class='lista-item'>{linha}</div>"
+        if horario in status_invisivel: continue # Pula ferias/afastado
+        
+        if "Folga" in horario:
+            lista_op_folga.append(nome)
+        else:
+            # Formata para a tabela: CX | NOME | HORARIO
+            h_clean = horario.replace(" HRS", "")
+            lista_op_trabalha.append({'cx': caixa, 'nome': nome, 'horario': h_clean})
 
-    # 2. Constrói a lista de Empacotadores
-    html_emp_list = ""
-    for _, row in df_emp.iterrows():
-        nome = row['nome']
-        horario = row['horario']
-        # Formato: NOME - HORARIO
-        linha = f"<strong>{nome}</strong> - {horario}"
-        html_emp_list += f"<div class='lista-item'>{linha}</div>"
+    # Processa Empacotadores
+    for _, row in df_emp_dia.iterrows():
+        nome = str(row['nome']).upper()
+        horario = str(row['horario'])
+        
+        if horario in status_invisivel: continue
+        
+        if "Folga" in horario:
+            lista_emp_folga.append(nome)
+        else:
+            h_clean = horario.replace(" HRS", "")
+            lista_emp_trabalha.append({'nome': nome, 'horario': h_clean})
 
-    # 3. O HTML completo com CSS simplificado (estilo "papel de parede")
+    # 2. Construir as linhas da tabela (Juntando as duas listas)
+    # Usamos zip_longest para criar a tabela lado a lado, mesmo que um lado tenha mais gente
+    rows_html = ""
+    zipped = list(zip_longest(lista_op_trabalha, lista_emp_trabalha, fillvalue=None))
+    
+    for idx, (op, emp) in enumerate(zipped):
+        bg_class = "even" if idx % 2 == 0 else "odd" # Zebra striping
+        
+        # Coluna Operadora
+        if op:
+            cx_val = op['cx'] if op['cx'] else ""
+            op_html = f"<td class='cx-col'>{cx_val}</td><td class='nome-col'>{op['nome']}</td>"
+        else:
+            op_html = "<td class='cx-col'></td><td class='nome-col'></td>"
+            
+        # Coluna Empacotador
+        if emp:
+            emp_html = f"<td class='pacote-col'><strong>{emp['nome']}</strong> <span class='time'>{emp['horario']}</span></td>"
+        else:
+            emp_html = "<td class='pacote-col'></td>"
+            
+        rows_html += f"<tr class='{bg_class}'>{op_html}{emp_html}</tr>"
+
+    # 3. Construir o Rodapé de Folgas
+    str_folga_op = ", ".join(lista_op_folga)
+    str_folga_emp = ", ".join(lista_emp_folga)
+
+    # 4. HTML Final (CSS Estrito para copiar a foto)
     return f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
-        <title>Escala Diária - {data_str}</title>
+        <title>Escala {dia_semana}</title>
         <style>
-            /* Fonte simples e escura para impressão nítida */
-            body {{ font-family: Arial, sans-serif; background-color: white; margin: 30px; color: #000; }}
+            @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap');
             
-            /* Header grandão e simples igual da foto */
-            .header-top {{ text-align: center; font-size: 26px; font-weight: bold; margin-bottom: 40px; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 10px; }}
-
-            /* Layout de duas colunas lado a lado */
-            .main-container {{ display: flex; justify-content: space-between; gap: 50px; }}
-            .column {{ width: 48%; }}
-
-            /* Títulos das colunas (OPERADORAS / EMPACOTADORES) */
-            .col-title {{ 
-                font-size: 20px; 
-                font-weight: bold; 
-                text-decoration: underline; 
-                margin-bottom: 20px; 
-                text-transform: uppercase;
-            }}
-
-            /* Itens da lista (cada pessoa) */
-            .lista-item {{ 
-                margin-bottom: 10px; 
-                font-size: 15px; 
-                /* border-bottom: 1px dotted #ccc;  Opcional: linha pontilhada entre nomes */
-                padding-bottom: 5px;
-            }}
+            body {{ font-family: 'Roboto Condensed', Arial, sans-serif; color: #000; margin: 0; padding: 10px; background: white; }}
             
-            /* Nomes e Caixas em Negrito */
-            .lista-item strong {{ font-weight: bold; }}
+            /* CABEÇALHO */
+            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 3px solid #000; padding-bottom: 5px; }}
+            .header-dia {{ font-size: 32px; font-weight: 800; text-transform: uppercase; }}
+            .header-data {{ font-size: 24px; font-weight: bold; }}
 
-            /* Ajustes específicos para quando for imprimir de verdade */
+            /* TABELA PRINCIPAL */
+            table {{ width: 100%; border-collapse: collapse; font-size: 14px; border: 1px solid #000; }}
+            
+            /* Títulos das Colunas (Faixa Escura) */
+            thead th {{ background-color: #222; color: #fff; padding: 6px; text-transform: uppercase; border: 1px solid #000; -webkit-print-color-adjust: exact; }}
+            
+            /* Células */
+            td {{ padding: 4px 6px; border-right: 1px solid #000; vertical-align: middle; }}
+            
+            /* Coluna CX (Número) */
+            .cx-col {{ width: 40px; text-align: center; font-weight: bold; font-size: 16px; }}
+            
+            /* Coluna Nome Operadora */
+            .nome-col {{ text-align: center; font-weight: bold; }}
+            
+            /* Coluna Pacote */
+            .pacote-col {{ text-align: left; padding-left: 10px; border-right: none; }}
+            
+            /* Cores Zebradas (Cinza e Branco) */
+            tr.odd {{ background-color: #fff; }}
+            tr.even {{ background-color: #e0e0e0; -webkit-print-color-adjust: exact; }}
+
+            /* RODAPÉ DE FOLGAS */
+            .footer-box {{ margin-top: 2px; border: 1px solid #000; }}
+            .footer-title {{ background-color: #222; color: #fff; text-align: center; font-weight: bold; padding: 4px; -webkit-print-color-adjust: exact; font-size: 12px; }}
+            .footer-content {{ padding: 8px; font-size: 12px; text-align: center; min-height: 40px; background-color: #f0f0f0; -webkit-print-color-adjust: exact; }}
+            
+            .row-footer {{ display: flex; border-top: 1px solid #000; }}
+            .half {{ width: 50%; }}
+            .br { { border-right: 1px solid #000; } }
+
+            .time {{ font-weight: normal; font-size: 0.9em; margin-left: 5px; }}
+
             @media print {{
-                body {{ margin: 0; padding: 20px; }}
-                .main-container {{ gap: 30px; }}
-                .column {{ width: 49%; }}
-                /* Força o preto e branco real */
-                * {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; color: #000 !important; }}
+                body {{ padding: 0; margin: 0; }}
+                /* Garante que o fundo cinza saia na impressão */
+                tr.even {{ background-color: #ccc !important; }}
+                thead th {{ background-color: #000 !important; color: #fff !important; }}
+                .footer-title {{ background-color: #000 !important; color: #fff !important; }}
             }}
         </style>
     </head>
     <body>
-        <div class="header-top">
-            {dia_semana} - {data_str}
+        <div class="header">
+            <div class="header-dia">{dia_semana.split('-')[0]}</div>
+            <div class="header-data">DATA: {data_str}</div>
         </div>
 
-        <div class="main-container">
-            <div class="column">
-                <div class="col-title">OPERADORAS</div>
-                {html_ops_list}
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 50px;">CX</th>
+                    <th>CAIXA</th>
+                    <th>PACOTE</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+
+        <div class="row-footer">
+            <div class="half" style="border-right: 1px solid #000;">
+                <div class="footer-title">FOLGAS OPERADORES</div>
+                <div class="footer-content">{str_folga_op}</div>
             </div>
-            
-            <div class="column">
-                <div class="col-title">EMPACOTADORES</div>
-                {html_emp_list}
+            <div class="half">
+                <div class="footer-title">FOLGAS EMPACOTADORES</div>
+                <div class="footer-content">{str_folga_emp}</div>
             </div>
         </div>
+        
+        <div style="margin-top: 10px; border: 1px solid #000; padding: 5px; font-size: 12px;">
+            <b>FISCAIS:</b> _________________________________________________
+        </div>
+
     </body>
     </html>
     """
@@ -417,7 +451,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
 
                     st.dataframe(display[cols_renamed], use_container_width=True, hide_index=True)
                     
-                    # Usa a função da escala SEMANAL aqui
                     html = gerar_html_escala_semanal(display[cols_renamed], nome_selecionado, semana_str)
                     b64 = base64.b64encode(html.encode('utf-8')).decode()
                     nome_arq = f"escala_{nome_selecionado.strip().replace(' ','_')}.html"
@@ -772,23 +805,21 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                         time.sleep(1)
                         st.rerun()
 
-# --- ABA DE ESCALA DIÁRIA (IMPRESSÃO ESTILO FOTO) ---
+# --- ABA DE ESCALA DIÁRIA (IMPRESSÃO ESTILO FOTO - PRETO E BRANCO) ---
 @st.fragment
 def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("🖨️ Escala Diária (Impressão)")
-    st.info("Selecione a semana e o dia específico para editar e imprimir a escala diária no formato de lista.")
+    st.info("Selecione a semana e o dia específico para editar e imprimir a escala diária.")
 
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
 
-    # 1. Selecionar Semana
     opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
     semana_str = st.selectbox("1. Selecione a Semana:", options=opcoes.keys())
     semana_info = opcoes[semana_str]
     id_semana = semana_info['id']
     data_inicio_semana = semana_info['data_inicio']
 
-    # 2. Selecionar Dia da Semana
     dias_opcoes = [f"{DIAS_SEMANA_PT[i]} ({(data_inicio_semana + timedelta(days=i)).strftime('%d/%m')})" for i in range(7)]
     dia_selecionado_str = st.selectbox("2. Selecione o Dia:", dias_opcoes)
     idx_dia = dias_opcoes.index(dia_selecionado_str)
@@ -797,30 +828,20 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
 
     st.markdown("---")
 
-    # 3. Carregar dados do banco para aquele dia
     df_full = carregar_escala_semana_por_id(id_semana)
-    
-    # Filtrar pelo dia selecionado
     df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
-    
-    if df_dia.empty:
-        df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
+    if df_dia.empty: df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
 
-    # 4. Separar Operadoras e Empacotadores
     df_ops_base = df_colaboradores[df_colaboradores['funcao'] == 'Operador(a) de Caixa']
     df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
 
-    # Merge para trazer horários salvos
     df_ops_final = df_ops_base.merge(df_dia[['nome', 'horario', 'numero_caixa']], on='nome', how='left').fillna("")
     df_emp_final = df_emp_base.merge(df_dia[['nome', 'horario']], on='nome', how='left').fillna("")
 
-    # Ordenar por nome
     df_ops_final = df_ops_final.sort_values('nome')
     df_emp_final = df_emp_final.sort_values('nome')
 
-    # 5. Interface de Edição (Editores lado a lado)
     c1, c2 = st.columns(2)
-    
     with c1:
         st.markdown("### 🛒 Operadoras")
         df_ops_edited = st.data_editor(
@@ -828,7 +849,6 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
             column_config={"nome": "Nome", "horario": "Horário", "numero_caixa": "Caixa"},
             hide_index=True, use_container_width=True, key=f"editor_ops_{data_selecionada}"
         )
-
     with c2:
         st.markdown("### 📦 Empacotadores")
         df_emp_edited = st.data_editor(
@@ -838,23 +858,18 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
         )
 
     st.markdown("---")
-    
-    # 6. Botão de Gerar Impressão (ESTILO FOTO)
     if st.button("🖨️ Gerar Impressão (Estilo Lista)", type="primary"):
-        # Filtra apenas quem tem horário
-        df_ops_print = df_ops_edited[df_ops_edited['horario'] != ""].copy()
-        df_emp_print = df_emp_edited[df_emp_edited['horario'] != ""].copy()
+        df_ops_print = df_ops_edited.copy()
+        df_emp_print = df_emp_edited.copy()
         
-        # Usa a NOVA função de estilo foto
-        html_content = gerar_html_diario_estilo_foto(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
+        # Filtro: Nao mostrar se horario for vazio
+        df_ops_print = df_ops_print[df_ops_print['horario'] != ""]
+        df_emp_print = df_emp_print[df_emp_print['horario'] != ""]
+
+        html_content = gerar_html_layout_exato(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
-        
-        # Link de download
-        st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_lista_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
-        
-        # Preview rápido
-        with st.expander("Pré-visualização"):
-            st.components.v1.html(html_content, height=600, scrolling=True)
+        st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
+        with st.expander("Pré-visualização"): st.components.v1.html(html_content, height=600, scrolling=True)
 
 # --- Main ---
 def main():
@@ -879,11 +894,10 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        # Adicionei a nova aba aqui na lista e no bloco with
         t1, t2, t3, t4, t5, t6 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
-        with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas) # Nova Aba
+        with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas) 
         with t4: aba_importar_excel(df_colaboradores, df_semanas_ativas)
         with t5: aba_gerenciar_colaboradores(df_colaboradores)
         with t6: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
