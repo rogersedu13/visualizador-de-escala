@@ -23,7 +23,7 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# --- REGRAS DE HORÁRIOS E CAIXAS ---
+# --- REGRAS DE HORÁRIOS E CAIXAS (Mantidas como referência) ---
 HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
 HORARIOS_LIVRES_TARDE = [
     "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
@@ -35,6 +35,13 @@ HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
 
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
 CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
+
+# Grupos de Cores para o Excel
+H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
+H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
+H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
+H_CINZA    = ["Folga"]
+H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
@@ -377,8 +384,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
     st.markdown("---")
     if semana_info and colaborador:
         id_semana = semana_info['id']; data_ini = semana_info['data_inicio']
-        
-        # Carrega dados
         df_full = carregar_escala_semana_por_id(id_semana)
         escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
         
@@ -391,140 +396,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if not f.empty: funcao_atual = f.iloc[0]
         
         is_operador = (funcao_atual == "Operador(a) de Caixa")
-
-        # ==============================================================================
-        #  BOTÃO DE AÇÃO DIRETA (ROBÔ SEGURO)
-        # ==============================================================================
-        if is_operador:
-            col_btn_mag, col_txt_mag = st.columns([1, 3])
-            with col_btn_mag:
-                if st.button("⚡ Distribuir Automaticamente", type="primary", help="Calcula e SALVA IMEDIATAMENTE no banco."):
-                    with st.spinner("Calculando regras e salvando..."):
-                        # 1. Analisa Ocupação Global do Banco
-                        ocupacao_semana = {} 
-                        try:
-                            dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
-                            df_ocup = pd.DataFrame(dados_semana_raw.data)
-                            if not df_ocup.empty:
-                                # Remove a própria pessoa da análise
-                                df_ocup = df_ocup[df_ocup['nome'] != colaborador]
-                                for _, r in df_ocup.iterrows():
-                                    d_temp = pd.to_datetime(r['data']).date()
-                                    cx_temp = str(r['numero_caixa']).strip()
-                                    h_temp = str(r['horario']).strip()
-                                    if cx_temp and cx_temp.isdigit():
-                                        if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
-                                        ocupacao_semana[d_temp][int(cx_temp)] = h_temp
-                                    elif cx_temp == "Self":
-                                        if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
-                                        ocupacao_semana[d_temp][999] = h_temp
-                        except: pass
-
-                        caixas_usados_na_semana = []
-                        novos_caixas_para_salvar = [] 
-                        horarios_para_salvar = [] 
-                        
-                        # 2. Loop dia a dia
-                        for i in range(7):
-                            dia_calc = data_ini + timedelta(days=i)
-                            
-                            # PRIORIDADE: LER DA TELA (SESSION STATE)
-                            key_h_ui = f"h_{colaborador}_{dia_calc.strftime('%Y%m%d')}"
-                            h_str = st.session_state.get(key_h_ui, horarios_atuais.get(dia_calc, ""))
-                            
-                            horarios_para_salvar.append(h_str)
-                            
-                            if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                                novos_caixas_para_salvar.append(None)
-                                continue
-
-                            # -- REGRAS --
-                            eh_domingo = (dia_calc.weekday() == 6)
-                            ocupados_hoje = ocupacao_semana.get(dia_calc, {})
-
-                            candidatos = []
-                            if h_str in HORARIOS_RESTRITOS:
-                                candidatos = CAIXAS_RESTRITOS_LISTA
-                            else:
-                                candidatos = CAIXAS_ESPECIAIS_LISTA + [str(x) for x in range(1, 18) if str(x) not in CAIXAS_ESPECIAIS_LISTA]
-
-                            prioridade_especial = []
-                            prioridade_normal = []
-                            
-                            # Verifica cobertura necessária
-                            needs_morning = []
-                            needs_afternoon = []
-                            for cx_esp in CAIXAS_ESPECIAIS_LISTA:
-                                c_int = int(cx_esp) if cx_esp != "Self" else 999
-                                tem_manha = False; tem_tarde = False
-                                h_viz = ocupados_hoje.get(c_int)
-                                if h_viz:
-                                    if h_viz in HORARIOS_LIVRES_MANHA: tem_manha = True
-                                    if h_viz in HORARIOS_LIVRES_TARDE: tem_tarde = True
-                                if not tem_manha: needs_morning.append(cx_esp)
-                                if not tem_tarde: needs_afternoon.append(cx_esp)
-
-                            sou_manha = h_str in HORARIOS_LIVRES_MANHA
-                            sou_tarde = h_str in HORARIOS_LIVRES_TARDE
-
-                            # Filtra
-                            for c_cand in candidatos:
-                                if c_cand in caixas_usados_na_semana: continue
-                                if c_cand=="16" and "17" in caixas_usados_na_semana: continue
-                                if c_cand=="17" and "16" in caixas_usados_na_semana: continue
-                                
-                                c_int = int(c_cand) if c_cand != "Self" else 999
-                                if c_int in ocupados_hoje: continue 
-
-                                if c_cand not in CAIXAS_ESPECIAIS_LISTA and not eh_domingo:
-                                    viz_esq = ocupados_hoje.get(c_int - 1)
-                                    viz_dir = ocupados_hoje.get(c_int + 1)
-                                    if viz_esq == h_str or viz_dir == h_str: continue
-
-                                eh_prioridade = False
-                                if c_cand in CAIXAS_ESPECIAIS_LISTA:
-                                    if h_str not in HORARIOS_LIVRES_TOTAL: continue 
-                                    if sou_manha and c_cand in needs_morning: eh_prioridade = True
-                                    if sou_tarde and c_cand in needs_afternoon: eh_prioridade = True
-                                    
-                                    if eh_prioridade: prioridade_especial.append(c_cand)
-                                    else: prioridade_normal.append(c_cand)
-                                else:
-                                    prioridade_normal.append(c_cand)
-
-                            escolha = None
-                            if prioridade_especial: escolha = random.choice(prioridade_especial)
-                            elif prioridade_normal: escolha = random.choice(prioridade_normal)
-                            else:
-                                validos_fallback = []
-                                for c_cand in candidatos:
-                                    c_int = int(c_cand) if c_cand != "Self" else 999
-                                    if c_int in ocupados_hoje: continue
-                                    if c_cand in CAIXAS_ESPECIAIS_LISTA and h_str not in HORARIOS_LIVRES_TOTAL: continue
-                                    if c_cand not in CAIXAS_ESPECIAIS_LISTA and not eh_domingo:
-                                        viz_esq = ocupados_hoje.get(c_int - 1)
-                                        viz_dir = ocupados_hoje.get(c_int + 1)
-                                        if viz_esq == h_str or viz_dir == h_str: continue
-                                    validos_fallback.append(c_cand)
-                                if validos_fallback: escolha = random.choice(validos_fallback)
-                            
-                            novos_caixas_para_salvar.append(escolha)
-                            if escolha: caixas_usados_na_semana.append(escolha)
-
-                        # 3. SALVA E LIMPA
-                        salvar_escala_individual(colaborador, horarios_para_salvar, novos_caixas_para_salvar, data_ini, id_semana)
-                        
-                        # CRÍTICO: LIMPEZA DE CACHE + ESTADO DO WIDGET
-                        st.cache_data.clear()
-                        for k in list(st.session_state.keys()):
-                            if f"_{colaborador}_" in k:
-                                del st.session_state[k]
-                                
-                        st.success("Caixas distribuídos e salvos!")
-                        time.sleep(1)
-                        st.rerun()
-            with col_txt_mag:
-                st.caption("O robô usa os horários da tela, calcula os caixas e salva.")
 
         st.markdown(f"**Editando:** `{colaborador}` ({funcao_atual})")
         
@@ -544,7 +415,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
-                # CHAVE ÚNICA PARA O SELECTBOX
+                # Chave única para o Selectbox (Nome + Data)
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
@@ -562,13 +433,10 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 novos_caixas.append(val_c)
         
         st.markdown("")
-        if st.button("💾 Salvar Alterações Manuais", type="primary", use_container_width=True):
+        if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
+                # Limpa o cache para garantir que os dados "fantasmas" não persistam ao trocar de operadora
                 st.cache_data.clear()
-                # Limpa estado para evitar fantasmas
-                for k in list(st.session_state.keys()):
-                    if f"_{colaborador}_" in k:
-                        del st.session_state[k]
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 @st.fragment
