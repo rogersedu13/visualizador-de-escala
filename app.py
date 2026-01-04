@@ -23,7 +23,7 @@ HORARIOS_PADRAO = [
     "Afastado(a)", "Atestado",
 ]
 
-# --- REGRAS DE HORÁRIOS E CAIXAS (Mantidas como referência) ---
+# --- REGRAS DE HORÁRIOS E CAIXAS ---
 HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
 HORARIOS_LIVRES_TARDE = [
     "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
@@ -35,13 +35,6 @@ HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
 
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
 CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
-
-# Grupos de Cores para o Excel
-H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
-H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
-H_CINZA    = ["Folga"]
-H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
 # Lista de Caixas
 LISTA_CAIXAS = ["", "---", "Self"] + [str(i) for i in range(1, 18)]
@@ -288,6 +281,61 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     </html>
     """
 
+def gerar_html_diario(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str, dia_semana: str):
+    # CSS para o layout lado a lado
+    return f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Escala Diária - {data_str}</title>
+        <style>
+            body {{ font-family: 'Arial', sans-serif; margin: 0; padding: 20px; background-color: white; }}
+            .header {{ text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+            .header h1 {{ margin: 0; font-size: 24px; text-transform: uppercase; }}
+            .header h2 {{ margin: 5px 0 0 0; font-size: 18px; color: #555; font-weight: normal; }}
+            
+            .container {{ display: flex; justify-content: space-between; gap: 20px; }}
+            .column {{ width: 48%; }}
+            
+            h3 {{ background-color: #34495e; color: white; padding: 10px; text-align: center; margin-top: 0; margin-bottom: 0; text-transform: uppercase; font-size: 16px; border-radius: 4px 4px 0 0; }}
+            
+            table {{ width: 100%; border-collapse: collapse; border: 1px solid #ccc; }}
+            th, td {{ padding: 8px; text-align: center; border-bottom: 1px solid #ddd; font-size: 14px; }}
+            th {{ background-color: #f2f2f2; font-weight: bold; color: #333; }}
+            tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            
+            .box-num {{ font-weight: bold; font-size: 15px; color: #2c3e50; }}
+            .time {{ font-weight: bold; color: #e67e22; }}
+            
+            @media print {{
+                body {{ padding: 0; }}
+                .column {{ width: 49%; }}
+                h3 {{ background-color: #ccc; color: black; border: 1px solid #000; }}
+                th {{ background-color: #eee !important; -webkit-print-color-adjust: exact; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Escala Diária</h1>
+            <h2>{dia_semana} - {data_str}</h2>
+        </div>
+        
+        <div class="container">
+            <div class="column">
+                <h3>Operadoras</h3>
+                {df_ops.to_html(index=False, border=0, classes='tabela')}
+            </div>
+            <div class="column">
+                <h3>Empacotadores</h3>
+                {df_emp.to_html(index=False, border=0, classes='tabela')}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
 # --- ABAS ---
 
 @st.fragment
@@ -415,7 +463,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
-                # Chave única para o Selectbox (Nome + Data)
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
@@ -435,8 +482,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                # Limpa o cache para garantir que os dados "fantasmas" não persistam ao trocar de operadora
-                st.cache_data.clear()
+                st.cache_data.clear() # Limpa o cache para garantir que a próxima edição carregue dados novos
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 @st.fragment
@@ -683,6 +729,104 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                         time.sleep(1)
                         st.rerun()
 
+# --- ABA DE ESCALA DIÁRIA (NOVA) ---
+@st.fragment
+def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
+    st.subheader("🖨️ Escala Diária (Impressão)")
+    st.info("Selecione a semana e o dia específico para editar e imprimir a escala diária.")
+
+    if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
+    if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
+
+    # 1. Selecionar Semana
+    opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+    semana_str = st.selectbox("1. Selecione a Semana:", options=opcoes.keys())
+    semana_info = opcoes[semana_str]
+    id_semana = semana_info['id']
+    data_inicio_semana = semana_info['data_inicio']
+
+    # 2. Selecionar Dia da Semana
+    dias_opcoes = [f"{DIAS_SEMANA_PT[i]} ({(data_inicio_semana + timedelta(days=i)).strftime('%d/%m')})" for i in range(7)]
+    dia_selecionado_str = st.selectbox("2. Selecione o Dia:", dias_opcoes)
+    idx_dia = dias_opcoes.index(dia_selecionado_str)
+    data_selecionada = data_inicio_semana + timedelta(days=idx_dia)
+    dia_semana_nome = DIAS_SEMANA_FULL[data_selecionada.weekday()]
+
+    st.markdown("---")
+
+    # 3. Carregar dados do banco para aquele dia
+    df_full = carregar_escala_semana_por_id(id_semana)
+    
+    # Filtrar pelo dia selecionado
+    df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
+    
+    # Se não tiver dados no banco para esse dia, cria estrutura vazia
+    if df_dia.empty:
+        df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
+
+    # 4. Separar Operadoras e Empacotadores
+    # Garantir que todos os colaboradores apareçam, mesmo sem horário salvo
+    df_ops_base = df_colaboradores[df_colaboradores['funcao'] == 'Operador(a) de Caixa']
+    df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
+
+    # Merge para trazer horários salvos
+    df_ops_final = df_ops_base.merge(df_dia[['nome', 'horario', 'numero_caixa']], on='nome', how='left').fillna("")
+    df_emp_final = df_emp_base.merge(df_dia[['nome', 'horario']], on='nome', how='left').fillna("")
+
+    # Ordenar por nome
+    df_ops_final = df_ops_final.sort_values('nome')
+    df_emp_final = df_emp_final.sort_values('nome')
+
+    # 5. Interface de Edição (Editores lado a lado)
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.markdown("### 🛒 Operadoras")
+        # Editor para Operadoras (Nome, Horário, Caixa)
+        df_ops_edited = st.data_editor(
+            df_ops_final[['nome', 'horario', 'numero_caixa']],
+            column_config={
+                "nome": "Nome",
+                "horario": "Horário",
+                "numero_caixa": "Caixa"
+            },
+            hide_index=True,
+            use_container_width=True,
+            key=f"editor_ops_{data_selecionada}"
+        )
+
+    with c2:
+        st.markdown("### 📦 Empacotadores")
+        # Editor para Empacotadores (Nome, Horário)
+        df_emp_edited = st.data_editor(
+            df_emp_final[['nome', 'horario']],
+            column_config={
+                "nome": "Nome",
+                "horario": "Horário"
+            },
+            hide_index=True,
+            use_container_width=True,
+            key=f"editor_emp_{data_selecionada}"
+        )
+
+    st.markdown("---")
+    
+    # 6. Botão de Gerar Impressão
+    if st.button("🖨️ Gerar Visualização de Impressão", type="primary"):
+        # Filtra apenas quem tem horário definido para a impressão ficar limpa
+        df_ops_print = df_ops_edited[df_ops_edited['horario'] != ""].copy()
+        df_emp_print = df_emp_edited[df_emp_edited['horario'] != ""].copy()
+        
+        html_content = gerar_html_diario(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
+        b64 = base64.b64encode(html_content.encode('utf-8')).decode()
+        
+        # Link de download
+        st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
+        
+        # Preview rápido (opcional, apenas para confirmação visual)
+        with st.expander("Pré-visualização (Simplificada)"):
+            st.components.v1.html(html_content, height=600, scrolling=True)
+
 # --- Main ---
 def main():
     st.title("📅 Sistema de Escalas")
@@ -706,12 +850,14 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
+        # Adicionei a nova aba aqui na lista e no bloco with
+        t1, t2, t3, t4, t5, t6 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
-        with t3: aba_importar_excel(df_colaboradores, df_semanas_ativas)
-        with t4: aba_gerenciar_colaboradores(df_colaboradores)
-        with t5: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
+        with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas) # Nova Aba
+        with t4: aba_importar_excel(df_colaboradores, df_semanas_ativas)
+        with t5: aba_gerenciar_colaboradores(df_colaboradores)
+        with t6: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
     else:
         aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
