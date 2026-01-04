@@ -24,7 +24,6 @@ HORARIOS_PADRAO = [
 ]
 
 # --- REGRAS DE HORÁRIOS E CAIXAS ---
-# Horários "Livres" que permitem sentar nos Especiais
 HORARIOS_LIVRES_MANHA = ["5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS"]
 HORARIOS_LIVRES_TARDE = [
     "11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
@@ -32,14 +31,9 @@ HORARIOS_LIVRES_TARDE = [
 ]
 HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
 
-# Horários Restritos (Só podem sentar nos caixas 02 a 10)
 HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
 
-# Caixas Especiais (Exigem cobertura Manhã E Tarde + Aceitam vizinhos iguais)
-# Caixa 01 incluído conforme solicitado
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
-
-# Caixas para o "Miolo" (Horários Restritos)
 CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
 
 # Grupos de Cores para o Excel
@@ -419,7 +413,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                             dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
                             df_ocup = pd.DataFrame(dados_semana_raw.data)
                             if not df_ocup.empty:
-                                # Remove a própria pessoa da análise
                                 df_ocup = df_ocup[df_ocup['nome'] != colaborador]
                                 for _, r in df_ocup.iterrows():
                                     d_temp = pd.to_datetime(r['data']).date()
@@ -435,11 +428,17 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
 
                         caixas_usados_na_semana = []
                         novos_caixas_para_salvar = [] 
+                        horarios_para_salvar = [] # Para garantir que salve o que está na tela
                         
                         # 2. Loop dia a dia
                         for i in range(7):
                             dia_calc = data_ini + timedelta(days=i)
-                            h_str = horarios_atuais.get(dia_calc, "")
+                            
+                            # TENTA LER O QUE ESTÁ NA TELA (SESSION STATE) PRIMEIRO
+                            key_h_ui = f"h_{colaborador}_{dia_calc.strftime('%Y%m%d')}"
+                            h_str = st.session_state.get(key_h_ui, horarios_atuais.get(dia_calc, ""))
+                            
+                            horarios_para_salvar.append(h_str)
                             
                             if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
                                 novos_caixas_para_salvar.append(None)
@@ -458,7 +457,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                             prioridade_especial = []
                             prioridade_normal = []
                             
-                            # Verifica cobertura necessária
                             needs_morning = []
                             needs_afternoon = []
                             for cx_esp in CAIXAS_ESPECIAIS_LISTA:
@@ -474,14 +472,13 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                             sou_manha = h_str in HORARIOS_LIVRES_MANHA
                             sou_tarde = h_str in HORARIOS_LIVRES_TARDE
 
-                            # Filtra
                             for c_cand in candidatos:
                                 if c_cand in caixas_usados_na_semana: continue
                                 if c_cand=="16" and "17" in caixas_usados_na_semana: continue
                                 if c_cand=="17" and "16" in caixas_usados_na_semana: continue
                                 
                                 c_int = int(c_cand) if c_cand != "Self" else 999
-                                if c_int in ocupados_hoje: continue # Ocupado
+                                if c_int in ocupados_hoje: continue 
 
                                 if c_cand not in CAIXAS_ESPECIAIS_LISTA and not eh_domingo:
                                     viz_esq = ocupados_hoje.get(c_int - 1)
@@ -519,8 +516,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                             if escolha: caixas_usados_na_semana.append(escolha)
 
                         # 3. SALVA E LIMPA
-                        lista_h_save = [horarios_atuais.get(data_ini + timedelta(days=i), "") for i in range(7)]
-                        salvar_escala_individual(colaborador, lista_h_save, novos_caixas_para_salvar, data_ini, id_semana)
+                        salvar_escala_individual(colaborador, horarios_para_salvar, novos_caixas_para_salvar, data_ini, id_semana)
                         st.cache_data.clear() # Limpeza vital
                         st.success("Caixas distribuídos e salvos!")
                         time.sleep(1)
