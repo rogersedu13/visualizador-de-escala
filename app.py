@@ -207,7 +207,7 @@ def carregar_fiscais() -> pd.DataFrame:
 # Impressão SEMANAL (HTML Colorido) - Mantida para a aba de visão pública
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
-    return f"""
+    return f
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
@@ -234,7 +234,7 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
         </div>
     </body>
     </html>
-    """
+    
 
 # --- NOVA FUNÇÃO: VISUAL EXATO DAS FOTOS (PRETO/BRANCO, LISTRADO, RODAPÉ DE FOLGA) ---
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
@@ -315,7 +315,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     str_folga_emp = ", ".join(lista_emp_folga)
 
     # 4. HTML Final (CSS Estrito para copiar a foto)
-    return f"""
+    return f
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
@@ -409,9 +409,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
 
     </body>
     </html>
-    """
 
-# --- ABAS ---
+
+#--- ABAS ---
 
 @st.fragment
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
