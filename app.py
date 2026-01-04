@@ -7,7 +7,7 @@ from supabase import create_client, Client
 import time
 import base64
 import io
-import random  # Necessário para a Escala Mágica
+import random  # Essencial para a Escala Mágica
 
 # --- Constantes da Aplicação ---
 DIAS_SEMANA_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -134,7 +134,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
     try:
         datas_reais = [(data_inicio_semana + timedelta(days=i)).strftime('%d/%m/%Y') for i in range(7)]
         
-        # --- AUTO-CADASTRO: Carrega nomes existentes para evitar erro 23503 ---
+        # Auto-cadastro de nomes novos
         res_nomes = supabase.table('colaboradores').select('nome').execute()
         nomes_banco = {item['nome'] for item in res_nomes.data}
         
@@ -428,7 +428,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- NOVA FUNÇÃO: ESCALA MÁGICA ---
+# --- NOVA FUNÇÃO CORRIGIDA: ESCALA MÁGICA COM RERUN ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
@@ -467,88 +467,93 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
             st.session_state.user_magico_atual = colaborador
 
         st.markdown("### 🤖 Gerador Automático")
-        st.markdown("""
-        **Regras aplicadas:**
-        1. 🕒 **Horário:** Caixas Rápidos (16/17) apenas até 08:00 ou após 11:00.
-        2. ↔️ **Distanciamento:** Evita colocar ao lado de um caixa já ocupado (se houver alguém salvo).
-        3. 🔄 **Rotação:** Tenta não repetir o número do caixa na mesma semana.
-        """)
+        st.caption("⚠️ **Importante:** O robô lê os horários salvos no Banco. Defina os horários e **SALVE** antes de gerar.")
         
-        if st.button("🎲 Gerar Distribuição para esta pessoa", type="primary", use_container_width=True):
-            with st.spinner("Analisando vizinhos e horários..."):
-                ocupacao_semana = {} 
-                try:
-                    dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
-                    df_ocup = pd.DataFrame(dados_semana_raw.data)
-                    if not df_ocup.empty:
-                        df_ocup = df_ocup[df_ocup['nome'] != colaborador]
-                        for _, r in df_ocup.iterrows():
-                            d_temp = pd.to_datetime(r['data']).date()
-                            cx_temp = str(r['numero_caixa']).strip()
-                            if cx_temp and cx_temp.isdigit():
-                                if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = []
-                                ocupacao_semana[d_temp].append(int(cx_temp))
-                except Exception as e:
-                    print(f"Erro vizinhos: {e}")
+        col_btn, col_info = st.columns([2, 1])
+        with col_btn:
+            if st.button("🎲 Gerar Distribuição para esta pessoa", type="primary", use_container_width=True):
+                with st.spinner("Analisando vizinhos e horários..."):
+                    ocupacao_semana = {} 
+                    try:
+                        dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
+                        df_ocup = pd.DataFrame(dados_semana_raw.data)
+                        if not df_ocup.empty:
+                            df_ocup = df_ocup[df_ocup['nome'] != colaborador]
+                            for _, r in df_ocup.iterrows():
+                                d_temp = pd.to_datetime(r['data']).date()
+                                cx_temp = str(r['numero_caixa']).strip()
+                                if cx_temp and cx_temp.isdigit():
+                                    if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = []
+                                    ocupacao_semana[d_temp].append(int(cx_temp))
+                    except Exception as e:
+                        print(f"Erro vizinhos: {e}")
 
-                caixas_usados_pelo_user = []
-                rapido_usado = False
-                nova_sugestao = {}
+                    caixas_usados_pelo_user = []
+                    rapido_usado = False
+                    nova_sugestao = {}
+                    dias_calculados = 0
 
-                for i in range(7):
-                    dia_calc = data_ini + timedelta(days=i)
-                    h_str = horarios_atuais.get(dia_calc, "")
+                    for i in range(7):
+                        dia_calc = data_ini + timedelta(days=i)
+                        h_str = horarios_atuais.get(dia_calc, "")
 
-                    if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                        nova_sugestao[dia_calc] = "---" if h_str != "" else ""
-                        continue
+                        if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
+                            nova_sugestao[dia_calc] = "---" if h_str != "" else ""
+                            continue
 
-                    # REGRA DE VIZINHANÇA
-                    caixas_proibidos = set()
-                    ocupados_hoje = ocupacao_semana.get(dia_calc, [])
-                    for oc in ocupados_hoje:
-                        caixas_proibidos.add(str(oc))     
-                        caixas_proibidos.add(str(oc - 1)) 
-                        caixas_proibidos.add(str(oc + 1)) 
+                        dias_calculados += 1
 
-                    # REGRA DE HORÁRIO
-                    minutos = calcular_minutos(h_str)
-                    permite_rapido = False
-                    if minutos > 0:
-                        if minutos <= 480 or minutos >= 660:
-                            permite_rapido = True
+                        # REGRA DE VIZINHANÇA
+                        caixas_proibidos = set()
+                        ocupados_hoje = ocupacao_semana.get(dia_calc, [])
+                        for oc in ocupados_hoje:
+                            caixas_proibidos.add(str(oc))     
+                            caixas_proibidos.add(str(oc - 1)) 
+                            caixas_proibidos.add(str(oc + 1)) 
 
-                    pool = []
-                    
-                    # 1 ao 15 (Normais)
-                    for n in range(1, 16):
-                        s_n = str(n)
-                        if s_n not in caixas_proibidos and s_n not in caixas_usados_pelo_user:
-                            pool.append(s_n)
-                    
-                    # 16 e 17 (Rápidos)
-                    if permite_rapido and not rapido_usado:
-                        for r in [16, 17]:
-                            s_r = str(r)
-                            if s_r not in caixas_proibidos and s_r not in caixas_usados_pelo_user:
-                                pool.append(s_r)
+                        # REGRA DE HORÁRIO
+                        minutos = calcular_minutos(h_str)
+                        permite_rapido = False
+                        if minutos > 0:
+                            if minutos <= 480 or minutos >= 660:
+                                permite_rapido = True
 
-                    escolha = ""
-                    if pool:
-                        escolha = random.choice(pool)
-                    else:
-                        pool_fallback = [str(x) for x in range(1, 16) if str(x) not in caixas_proibidos]
-                        if pool_fallback:
-                            escolha = random.choice(pool_fallback)
+                        pool = []
+                        # 1 ao 15 (Normais)
+                        for n in range(1, 16):
+                            s_n = str(n)
+                            if s_n not in caixas_proibidos and s_n not in caixas_usados_pelo_user:
+                                pool.append(s_n)
+                        
+                        # 16 e 17 (Rápidos)
+                        if permite_rapido and not rapido_usado:
+                            for r in [16, 17]:
+                                s_r = str(r)
+                                if s_r not in caixas_proibidos and s_r not in caixas_usados_pelo_user:
+                                    pool.append(s_r)
+
+                        escolha = ""
+                        if pool:
+                            escolha = random.choice(pool)
                         else:
-                            escolha = str(random.randint(1, 15))
+                            pool_fallback = [str(x) for x in range(1, 16) if str(x) not in caixas_proibidos]
+                            if pool_fallback:
+                                escolha = random.choice(pool_fallback)
+                            else:
+                                escolha = str(random.randint(1, 15))
+                        
+                        nova_sugestao[dia_calc] = escolha
+                        caixas_usados_pelo_user.append(escolha)
+                        if escolha in ["16", "17"]: rapido_usado = True
                     
-                    nova_sugestao[dia_calc] = escolha
-                    caixas_usados_pelo_user.append(escolha)
-                    if escolha in ["16", "17"]: rapido_usado = True
-                
-                st.session_state.sugestao_magica = nova_sugestao
-                st.toast("Distribuição gerada! Revise abaixo e Salve.", icon="✨")
+                    st.session_state.sugestao_magica = nova_sugestao
+                    
+                    if dias_calculados == 0:
+                        st.warning("Não encontrei horários de trabalho salvos para esta semana. Defina os horários e salve antes de gerar.")
+                    else:
+                        st.success(f"Caixas distribuídos para {dias_calculados} dias!")
+                        time.sleep(1)
+                        st.rerun() # FORÇA A TELA A ATUALIZAR AGORA
 
         with st.form("form_escala_magica"):
             cols = st.columns(7)
@@ -586,6 +591,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
             if st.form_submit_button("💾 Confirmar e Salvar no Banco", type="primary", use_container_width=True):
                 if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                     st.success("Escala Mágica salva com sucesso!")
+                    st.session_state.sugestao_magica = {}
                     time.sleep(1.5)
                     st.rerun()
 
@@ -608,7 +614,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         data_ini = semana_info['data_inicio']
         id_semana = semana_info['id']
         
-        # Carrega dados do banco para pré-preencher (Feature de Download Pronto)
         df_dados_db = carregar_escala_semana_por_id(id_semana)
         
         df_filtrado = df_colaboradores.copy()
@@ -618,7 +623,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'.")
         else:
-            # GERA AS COLUNAS DO EXCEL
             colunas = ['Nome']
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
@@ -629,7 +633,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             df_template = pd.DataFrame(columns=colunas)
             df_template['Nome'] = sorted(df_filtrado['nome'].unique())
             
-            # Criar dicionário de dados existentes para preenchimento rápido
             dados_existentes = {}
             if not df_dados_db.empty:
                 df_db_filt = df_dados_db[df_dados_db['nome'].isin(df_filtrado['nome'])]
@@ -647,10 +650,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     workbook = writer.book
                     worksheet = writer.sheets['Escala']
 
-                    # --- CORREÇÃO DE VISUAL ---
                     worksheet.hide_gridlines(2)
                     
-                    # FORMATOS
                     fmt_grid = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
                     fmt_bold = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#D3D3D3', 'border': 1})
                     fmt_date_header = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1, 'font_color': 'black'}) 
@@ -672,7 +673,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     
-                    # CORREÇÃO DA BORDA INFINITA
                     worksheet.set_column(0, 0, 30, None)
                     
                     col_idx = 1
@@ -680,34 +680,29 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     row_total_m = last_data_row + 1
                     row_total_t = last_data_row + 2
                     
-                    # Preenchendo dados existentes no Excel
                     for r_idx, row_name in enumerate(df_template['Nome']):
                         row_excel = r_idx + 1
-                        worksheet.write(row_excel, 0, row_name, fmt_nome) # Reescreve nome com borda
+                        worksheet.write(row_excel, 0, row_name, fmt_nome)
                         
                         current_c = 1
                         for i_day in range(7):
                             d_atual = data_ini + timedelta(days=i_day)
                             info = dados_existentes.get((row_name, d_atual), {})
                             
-                            # Horário
                             h_val = info.get('horario', "")
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
-                            # Caixa
                             if funcao_selecionada == "Operador(a) de Caixa":
                                 c_val = info.get('caixa', "")
                                 worksheet.write(row_excel, current_c, c_val, fmt_grid)
                                 current_c += 1
 
-                    # Cabeçalhos e Validações
                     col_idx = 1
                     for i in range(7):
                         d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                         
                         worksheet.write(0, col_idx, d_str, fmt_date_header)
-                        # CORREÇÃO BORDA INFINITA
                         worksheet.set_column(col_idx, col_idx, 12, None)
                         
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$A$1:$A$' + str(len(HORARIOS_PADRAO))})
@@ -722,12 +717,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         
                         if funcao_selecionada == "Operador(a) de Caixa":
                             worksheet.write(0, col_idx, "CX", fmt_cx_header)
-                            # CORREÇÃO BORDA INFINITA
                             worksheet.set_column(col_idx, col_idx, 5, None)
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_CAIXAS))})
                             col_idx += 1
                     
-                    # --- TOTAIS ---
                     mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
@@ -771,7 +764,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             arquivo_upload = st.file_uploader("Arraste o Excel preenchido para Salvar:", type=["xlsx"], key="upl_excel_uniq")
             if arquivo_upload is not None:
                 if st.button("🚀 Processar e Salvar", type="primary", key="btn_proc_excel"):
-                    # ATUALIZADO: Passando id_semana
                     if salvar_escala_via_excel(pd.read_excel(arquivo_upload), data_ini, id_semana):
                         st.success("Importado com sucesso!"); time.sleep(2); st.cache_data.clear(); st.rerun()
 
@@ -869,11 +861,10 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        # ATUALIZADO: Com ícones e a nova aba
         t1, t2, t3, t4, t5, t6 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "✨ Escala Mágica", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
-        with t3: aba_escala_magica(df_colaboradores, df_semanas_ativas) # ABA NOVA
+        with t3: aba_escala_magica(df_colaboradores, df_semanas_ativas)
         with t4: aba_importar_excel(df_colaboradores, df_semanas_ativas)
         with t5: aba_gerenciar_colaboradores(df_colaboradores)
         with t6: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
