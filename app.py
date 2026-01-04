@@ -34,7 +34,7 @@ HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
 HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
 
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
-CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
+CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] 
 
 # Grupos de Cores para o Excel
 H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
@@ -415,6 +415,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
+                # CHAVE ÚNICA "MANUAL"
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
@@ -434,10 +435,10 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                st.cache_data.clear() # Limpa cache da edição manual também
+                st.cache_data.clear() # CRÍTICO: LIMPA O CACHE
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- ABA ESCALA MÁGICA: FINALIZADA COM COBERTURA OBRIGATÓRIA E LIMPEZA DE CACHE ---
+# --- ABA ESCALA MÁGICA: FINALIZADA COM LÓGICA MANUAL ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
@@ -469,27 +470,21 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
         caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
 
-        # Inicializa variáveis de estado
+        # Estado para controlar mudança de usuário
         if "user_magico_atual" not in st.session_state: st.session_state.user_magico_atual = ""
-        if "week_magico_atual" not in st.session_state: st.session_state.week_magico_atual = ""
-        if "sugestao_magica" not in st.session_state: st.session_state.sugestao_magica = {}
-
-        # --- Limpa memória se trocar de usuário OU de semana ---
-        if st.session_state.user_magico_atual != colaborador or st.session_state.week_magico_atual != id_semana:
+        
+        # Se mudou de usuário, limpa a sugestão mágica da memória
+        if st.session_state.user_magico_atual != colaborador:
             st.session_state.sugestao_magica = {}
             st.session_state.user_magico_atual = colaborador
-            st.session_state.week_magico_atual = id_semana
-            for k in list(st.session_state.keys()):
-                if k.startswith("hm_") or k.startswith("cm_"):
-                    del st.session_state[k]
 
+        # --- BOTÃO GERADOR ---
         st.markdown("### 🤖 Gerador Automático")
         col_btn, col_info = st.columns([2, 1])
         with col_btn:
             if st.button("🎲 Gerar Distribuição para esta pessoa", type="primary", use_container_width=True):
                 with st.spinner("Analisando Banco de Dados..."):
-                    # 1. Carrega Mapa de Ocupação Detalhado (Quem está onde e em qual horário)
-                    ocupacao_semana = {} # {data: {caixa: horario}}
+                    ocupacao_semana = {} 
                     try:
                         dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
                         df_ocup = pd.DataFrame(dados_semana_raw.data)
@@ -502,7 +497,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                                 if cx_temp and cx_temp.isdigit():
                                     if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
                                     ocupacao_semana[d_temp][int(cx_temp)] = h_temp
-                                elif cx_temp == "Self": # Trata Self como número especial 999
+                                elif cx_temp == "Self": 
                                     if d_temp not in ocupacao_semana: ocupacao_semana[d_temp] = {}
                                     ocupacao_semana[d_temp][999] = h_temp
                     except Exception as e:
@@ -510,23 +505,22 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
                     caixas_usados_pelo_user = []
                     dias_calculados = 0
+                    
+                    # Prepara a nova sugestão
+                    nova_sugestao = {}
 
                     for i in range(7):
                         dia_calc = data_ini + timedelta(days=i)
                         h_str = horarios_atuais.get(dia_calc, "")
 
-                        # Se não trabalha, pula
                         if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
-                            st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = "---" if h_str != "" else ""
                             continue
 
                         dias_calculados += 1
 
-                        # --- DEFINIÇÃO DE POOL (OPÇÕES VÁLIDAS) ---
                         pool = []
                         eh_domingo = (dia_calc.weekday() == 6)
 
-                        # Regra 1: Horários Restritos (9:00 - 10:30) vs Livres
                         if h_str in HORARIOS_RESTRITOS:
                             candidatos = CAIXAS_RESTRITOS_LISTA
                         else:
@@ -537,54 +531,37 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         prioridade_especial = []
                         prioridade_normal = []
 
-                        # -- VERIFICAÇÃO DE COBERTURA OBRIGATÓRIA (CRÍTICO) --
                         needs_morning = []
                         needs_afternoon = []
                         
-                        # Verifica quais especiais estão VAZIOS
                         for cx_esp in CAIXAS_ESPECIAIS_LISTA:
                             c_int = int(cx_esp) if cx_esp != "Self" else 999
-                            
                             tem_manha = False
                             tem_tarde = False
-                            
-                            # Verifica se já tem alguém lá no banco
                             horario_la = ocupados_hoje_map.get(c_int)
                             if horario_la:
                                 if horario_la in HORARIOS_LIVRES_MANHA: tem_manha = True
                                 if horario_la in HORARIOS_LIVRES_TARDE: tem_tarde = True
-                            
-                            # Se não tem, marca como Necessidade
                             if not tem_manha: needs_morning.append(cx_esp)
                             if not tem_tarde: needs_afternoon.append(cx_esp)
 
-                        # Agora classifica a operadora atual
                         sou_manha = h_str in HORARIOS_LIVRES_MANHA
                         sou_tarde = h_str in HORARIOS_LIVRES_TARDE
 
                         for c_cand in candidatos:
-                            # 1. Rotação Semanal
                             if c_cand in caixas_usados_pelo_user: continue
-                            
-                            # 2. Exclusão Mútua 16/17
                             if c_cand == "16" and "17" in caixas_usados_pelo_user: continue
                             if c_cand == "17" and "16" in caixas_usados_pelo_user: continue
 
-                            # 3. Ocupação HOJE
                             c_int = int(c_cand) if c_cand != "Self" else 999
-                            if c_int in ocupados_hoje_map: continue # Já tem gente
+                            if c_int in ocupados_hoje_map: continue
 
-                            # 4. Regra de Vizinhança
-                            # Só aplica se NÃO for Domingo e NÃO for Caixa Especial
                             if not eh_domingo and c_cand not in CAIXAS_ESPECIAIS_LISTA:
                                 viz_esq = ocupados_hoje_map.get(c_int - 1)
                                 viz_dir = ocupados_hoje_map.get(c_int + 1)
-                                
-                                # Bloqueia se vizinho tiver MESMO horário
                                 if viz_esq and viz_esq == h_str: continue
                                 if viz_dir and viz_dir == h_str: continue
 
-                            # 5. Prioridade Máxima
                             eh_prioridade_maxima = False
                             if c_cand in CAIXAS_ESPECIAIS_LISTA:
                                 if sou_manha and c_cand in needs_morning: eh_prioridade_maxima = True
@@ -597,44 +574,37 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                             elif c_cand not in CAIXAS_ESPECIAIS_LISTA:
                                 prioridade_normal.append(c_cand)
 
-                        # --- ESCOLHA DO CAIXA ---
                         escolha = ""
-                        
-                        if prioridade_especial:
-                             escolha = random.choice(prioridade_especial)
-                        
-                        elif prioridade_normal:
-                             escolha = random.choice(prioridade_normal)
-                        
+                        if prioridade_especial: escolha = random.choice(prioridade_especial)
+                        elif prioridade_normal: escolha = random.choice(prioridade_normal)
                         else:
-                            # Fallback: Relaxa rotação
                             pool_fallback = []
                             for c_cand in candidatos:
                                 c_int = int(c_cand) if c_cand != "Self" else 999
                                 if c_int in ocupados_hoje_map: continue 
-                                
                                 if not eh_domingo and c_cand not in CAIXAS_ESPECIAIS_LISTA:
                                     viz_esq = ocupados_hoje_map.get(c_int - 1)
                                     viz_dir = ocupados_hoje_map.get(c_int + 1)
                                     if viz_esq == h_str or viz_dir == h_str: continue
-                                
                                 if c_cand in CAIXAS_ESPECIAIS_LISTA and h_str not in HORARIOS_LIVRES_TOTAL: continue
-
                                 pool_fallback.append(c_cand)
                             
                             if pool_fallback: escolha = random.choice(pool_fallback)
                             else: escolha = str(random.randint(1, 15)) 
 
-                        st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = escolha
+                        nova_sugestao[dia_calc] = escolha
                         caixas_usados_pelo_user.append(escolha)
+                    
+                    st.session_state.sugestao_magica = nova_sugestao
                     
                     if dias_calculados == 0:
                         st.warning("Não encontrei horários no banco. Salve a escala primeiro.")
                     else:
-                        st.success(f"Distribuído para {dias_calculados} dias seguindo as novas regras!")
+                        st.success(f"Distribuído para {dias_calculados} dias!")
                         time.sleep(0.5)
                         st.rerun()
 
+        # --- EXIBIÇÃO E FORMULÁRIO (Igual à aba Manual) ---
         with st.form("form_escala_magica"):
             cols = st.columns(7)
             novos_horarios = []
@@ -646,17 +616,22 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 
                 horario_banco = horarios_atuais.get(dia_atual, "")
                 
-                # Caixa do Banco
-                caixa_inicial = caixas_atuais.get(dia_atual, "")
-                idx_c_inicial = 0
-                if caixa_inicial in LISTA_CAIXAS:
-                    idx_c_inicial = LISTA_CAIXAS.index(caixa_inicial)
+                # Definição do Caixa:
+                # 1. Tenta pegar da sugestão mágica (se acabou de ser gerada)
+                # 2. Se não tiver, pega do banco
+                caixa_final = st.session_state.sugestao_magica.get(dia_atual, caixas_atuais.get(dia_atual, ""))
+                
+                # Calcular Índice
+                idx_c = 0
+                if caixa_final in LISTA_CAIXAS:
+                    idx_c = LISTA_CAIXAS.index(caixa_final)
 
                 idx_h = HORARIOS_PADRAO.index(horario_banco) if horario_banco in HORARIOS_PADRAO else 0
                 
                 with cols[i]:
                     st.caption(dia_label)
-                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"hm_{i}_{colaborador}_{id_semana}", disabled=True, label_visibility="collapsed")
+                    # USANDO CHAVE ÚNICA COM NOME DO COLABORADOR E SEMANA (IGUAL MANUAL)
+                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"mag_h_{i}_{colaborador}_{id_semana}", disabled=True, label_visibility="collapsed")
                     novos_horarios.append(horario_banco)
                     
                     val_c = None
@@ -664,15 +639,16 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
                         val_c = "---"
                     else:
-                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c_inicial, key=f"cm_{i}_{colaborador}_{id_semana}", label_visibility="collapsed")
+                        # USANDO CHAVE ÚNICA "MAG" PARA CAIXA
+                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=f"mag_c_{i}_{colaborador}_{id_semana}", label_visibility="collapsed")
                     novos_caixas.append(val_c)
 
             st.markdown("")
             if st.form_submit_button("💾 Confirmar e Salvar no Banco", type="primary", use_container_width=True):
                 if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                    # O SEGREDO DO "REMOVEU OUTRA OPERADORA": LIMPAR O CACHE
-                    st.cache_data.clear() 
+                    st.cache_data.clear() # LIMPA CACHE PARA ATUALIZAR OUTRAS TELAS
                     st.success("Escala Mágica salva com sucesso!")
+                    st.session_state.sugestao_magica = {}
                     time.sleep(1.5)
                     st.rerun()
 
