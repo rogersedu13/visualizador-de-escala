@@ -205,7 +205,6 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- FUNÇÕES DE IMPRESSÃO ---
 
-# Impressão SEMANAL
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
@@ -245,17 +244,16 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     status_invisivel = ["Ferias", "Afastado(a)", "Atestado", "", None]
 
     # --- Contadores Inteligentes ---
-    # Manhã: Começa <= 10:30 (Considera 9:30 e 10:00 como Manhã)
-    # Tarde: Começa >= 9:30 (Considera 9:30 e 10:00 como Tarde)
-    # Self Separado
+    # Manhã: <= 10:30 (inclui 9:30, 10:00)
+    # Tarde: >= 9:30 (inclui 9:30, 10:00)
     c_op_manha = 0; c_self_manha = 0
     c_op_tarde = 0; c_self_tarde = 0
     c_emp_manha = 0; c_emp_tarde = 0
 
-    # 1. Separar e Agrupar OPERADORAS
+    # --- PROCESSA OPERADORAS ---
     ops_agrupado = {} # { "6:50 HRS": [ {cx, nome}, ... ] }
     
-    # Ordenar por Caixa (Self -> 17 -> 16...)
+    # Ordem: Self -> 17 -> 16...
     def sort_key_caixa(row):
         cx = str(row.get('numero_caixa', ''))
         cx = cx.replace('.0', '')
@@ -276,26 +274,24 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             lista_op_folga.append(nome)
             continue
             
-        # Contagem
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
         
-        # Lógica de "Dobra"
-        if mins <= 630: # <= 10:30 (Manhã)
+        if mins <= 630: # <= 10:30
             if is_self: c_self_manha += 1
             else: c_op_manha += 1
         
-        if mins >= 570: # >= 9:30 (Tarde)
+        if mins >= 570: # >= 9:30
             if is_self: c_self_tarde += 1
             else: c_op_tarde += 1
 
-        h_clean = horario.replace(" HRS", "").replace(":", ":")
+        h_clean = horario.replace(" HRS", "H").replace(":", ":")
         if horario not in ops_agrupado: ops_agrupado[horario] = []
         ops_agrupado[horario].append({'cx': cx, 'nome': nome})
 
-    # 2. Separar e Agrupar EMPACOTADORES
+    # --- PROCESSA EMPACOTADORES ---
     emp_agrupado = {}
-    df_emp_sorted = df_emp_dia.sort_values(by='nome') # Alfabético
+    df_emp_sorted = df_emp_dia.sort_values(by='nome')
     
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
@@ -313,11 +309,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         if horario not in emp_agrupado: emp_agrupado[horario] = []
         emp_agrupado[horario].append({'nome': nome})
 
-    # 3. Criar Lista Mestra de Horários (Ordenada)
+    # --- CRIA LISTA DE HORÁRIOS ÚNICOS E ORDENADOS ---
     todos_horarios = set(list(ops_agrupado.keys()) + list(emp_agrupado.keys()))
     horarios_ordenados = sorted(list(todos_horarios), key=lambda x: calcular_minutos(x))
 
-    # 4. Construir HTML Linha a Linha com SEPARADOR
+    # --- MONTA AS LINHAS DA TABELA (COM SEPARADOR) ---
     rows_html = ""
     
     for h_str in horarios_ordenados:
@@ -326,53 +322,48 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         ops_list = ops_agrupado.get(h_str, [])
         emp_list = emp_agrupado.get(h_str, [])
         
-        # Zip para alinhar
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
-        # Adiciona Header do Horário ou Linha Separadora (Visual Clean)
-        # O pedido foi: pular linha na divisão. Vamos fazer uma linha vazia fina.
+        # Pula linha entre horários (linha fina cinza)
         if rows_html != "":
             rows_html += "<tr class='spacer-row'><td colspan='5'></td></tr>"
 
         for idx, (op, emp) in enumerate(zipped):
-            # Lado Op
+            # Op
             if op:
                 cx_display = op['cx']
                 op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op['nome']}</td>"
+                time_op_html = f"<td class='horario-col'>{h_clean}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td>"
+                time_op_html = "<td class='horario-col'></td>" # Vazio se não tem pessoa
             
-            # Horário (Só na primeira linha do bloco ou em todas? Na foto é todas)
-            time_html = f"<td class='horario-col'>{h_clean}</td>"
-
-            # Lado Emp
+            # Emp
             if emp:
                 emp_html = f"<td class='nome-col border-left'>{emp['nome']}</td>"
+                time_emp_html = f"<td class='horario-col'>{h_clean}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td>"
+                time_emp_html = "<td class='horario-col'></td>" # Vazio se não tem pessoa
             
-            rows_html += f"<tr>{op_html}{time_html}{emp_html}{time_html}</tr>"
+            rows_html += f"<tr>{op_html}{time_op_html}{emp_html}{time_emp_html}</tr>"
 
     # Rodapé Folgas
     str_folga_op = ", ".join(sorted(lista_op_folga))
     str_folga_emp = ", ".join(sorted(lista_emp_folga))
 
-    # Strings Totais
+    # Totais
     tot_op_m = c_op_manha + c_self_manha
     tot_op_t = c_op_tarde + c_self_tarde
     
     resumo_op = f"""
-    <div style='text-align:left; padding-left:10px;'>
     MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>
     TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES
-    </div>
     """
     
     resumo_emp = f"""
-    <div style='text-align:left; padding-left:10px;'>
     MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>
     TARDE: {c_emp_tarde:02d} EMPACOTADORES
-    </div>
     """
 
     return f"""
@@ -380,29 +371,34 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
+        <title>Escala {dia_semana}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap');
             
             body {{ 
-                font-family: 'Roboto Condensed', Arial, sans-serif; 
+                font-family: 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif; 
                 color: #000; 
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
+                font-size: 11px; /* FONTE SUPER COMPACTA */
             }}
             
-            /* Títulos Centralizados */
-            .header-box {{ text-align: center; border-bottom: 3px solid #000; padding-bottom: 5px; margin-bottom: 5px; }}
-            .dia-titulo {{ font-size: 38px; font-weight: 900; text-transform: uppercase; margin: 0; line-height: 1; }}
-            .data-titulo {{ font-size: 24px; font-weight: bold; margin: 5px 0 0 0; }}
+            .header-main {{ 
+                text-align: center;
+                border-bottom: 3px solid #000; 
+                padding-bottom: 5px; 
+                margin-bottom: 3px;
+            }}
+            .header-dia {{ font-size: 40px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
+            .header-data {{ font-size: 26px; font-weight: bold; line-height: 1; }}
 
-            /* Tabela Compacta */
-            table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; }} /* FONTE PEQUENA */
+            table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 2px; }}
             
-            th {{ 
+            thead th {{ 
                 background-color: #222 !important; 
                 color: #fff !important; 
-                padding: 3px; 
+                padding: 2px; 
                 text-transform: uppercase; 
                 border: 1px solid #000; 
                 font-size: 12px;
@@ -410,43 +406,44 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             }}
             
             td {{ 
-                padding: 1px 4px; /* Padding Mínimo */
+                padding: 0px 3px; /* Padding Mínimo */
                 border: 1px solid #000; 
-                height: 16px; /* Altura Fixa Pequena */
+                height: 14px; /* Altura Mínima */
                 vertical-align: middle;
-                white-space: nowrap; /* Não quebra linha */
+                white-space: nowrap; 
                 overflow: hidden;
             }}
             
-            .spacer-row td {{ border-left: 2px solid #000; border-right: 2px solid #000; background-color: #888 !important; height: 4px; padding:0; -webkit-print-color-adjust: exact; }}
+            .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .cx-col {{ width: 30px; text-align: center; font-weight: bold; font-size: 12px; }}
-            .nome-col {{ font-weight: bold; text-transform: uppercase; }}
-            .horario-col {{ width: 50px; text-align: center; font-size: 10px; }}
+            .cx-col {{ width: 25px; text-align: center; font-weight: bold; font-size: 12px; }}
+            .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
+            .horario-col {{ width: 40px; text-align: center; font-size: 10px; font-weight: bold; }}
             .border-left {{ border-left: 3px solid #000; }}
 
-            /* Rodapé Folgas */
+            tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
+
+            /* Rodapé */
             .footer-container {{ display: flex; border: 2px solid #000; border-top: none; }}
             .footer-box {{ width: 50%; }}
-            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; }}
+            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 11px; padding: 2px; -webkit-print-color-adjust: exact; }}
+            .footer-content {{ background: #eee !important; font-size: 9px; padding: 2px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.1; }}
             
-            /* Tarja Totais */
             .totals-container {{ display: flex; border: 2px solid #000; border-top: none; background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
-            .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; }}
+            .totals-box {{ width: 50%; font-size: 10px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
 
             @media print {{
-                body {{ padding: 0; }}
-                th, .footer-header, .totals-container {{ background-color: #000 !important; color: #fff !important; }}
-                .spacer-row td {{ background-color: #888 !important; }}
-                .footer-content {{ background-color: #ddd !important; }}
+                body {{ padding: 0; margin: 0; }}
+                thead th, .footer-header, .totals-container {{ background-color: #000 !important; color: #fff !important; }}
+                tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
+                .spacer-row td {{ background-color: #999 !important; }}
             }}
         </style>
     </head>
     <body>
-        <div class="header-box">
-            <div class="dia-titulo">{dia_semana}</div>
-            <div class="data-titulo">DATA: {data_str}</div>
+        <div class="header-main">
+            <div class="header-dia">{dia_semana.split('-')[0]}</div>
+            <div class="header-data">DATA: {data_str}</div>
         </div>
 
         <table>
