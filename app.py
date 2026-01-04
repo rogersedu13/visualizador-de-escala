@@ -14,18 +14,21 @@ from itertools import zip_longest
 DIAS_SEMANA_PT = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
 FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Recepção"]
 
+# --- ATUALIZAÇÃO DOS HORÁRIOS (ADICIONADOS 14:45, 15:45, 16:45) ---
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
     "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
     "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
-    "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS", "Ferias",
+    "14:30 HRS", "14:45 HRS", "15:00 HRS", "15:30 HRS", "15:45 HRS", 
+    "16:00 HRS", "16:30 HRS", "16:45 HRS", "Ferias",
     "Afastado(a)", "Atestado",
 ]
 
 # --- CONSTANTES DE CORES (PARA O EXCEL) ---
 H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
 H_VERDE    = ["7:30 HRS", "8:00 HRS", "8:30 HRS", "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
-H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "15:00 HRS", "15:30 HRS", "16:00 HRS", "16:30 HRS"]
+# Atualizado H_ROXO com os novos horários da tarde
+H_ROXO     = ["11:00 HRS", "11:30 HRS", "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS", "14:30 HRS", "14:45 HRS", "15:00 HRS", "15:30 HRS", "15:45 HRS", "16:00 HRS", "16:30 HRS", "16:45 HRS"]
 H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
@@ -172,6 +175,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 caixa = None
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
+                    # Verifica a próxima coluna para ver se tem tarefa/caixa
                     if col_idx + 1 < len(df_excel.columns):
                         val_caixa = row.iloc[col_idx + 1]
                         if not pd.isna(val_caixa):
@@ -371,13 +375,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             # Op
             if op:
                 cx_display = op['cx']
-                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op['nome']}</td><td class='horario-col'>{op['h_clean']}</td>"
+                op_content = f"{op['nome']} - {op['h_clean']}"
+                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td><td class='horario-col'>{op['h_clean']}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
             
             # Emp
             if emp:
-                emp_html = f"<td class='nome-col border-left'>{emp['nome']}</td><td class='horario-col'>{emp['h_clean']}</td>"
+                emp_content = f"{emp['nome']} - {emp['h_clean']}" 
+                emp_html = f"<td class='nome-col border-left'>{emp_content}</td><td class='horario-col'>{emp['h_clean']}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
             
@@ -451,7 +457,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
             .cx-col {{ width: 45px; text-align: center; font-weight: bold; font-size: 13px; }}
-            .horario-col {{ width: 55px; text-align: center; font-weight: bold; font-size: 11px; }}
+            .horario-col {{ width: 40px; text-align: center; font-weight: bold; font-size: 11px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
             
@@ -486,9 +492,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 <tr>
                     <th class="cx-col">CX</th>
                     <th>OPERADOR(A)</th>
-                    <th class="horario-col">HORÁRIO</th>
+                    <th class="horario-col">H</th>
                     <th class="border-left">EMPACOTADOR(A)</th>
-                    <th class="horario-col">HORÁRIO</th>
+                    <th class="horario-col">H</th>
                 </tr>
             </thead>
             <tbody>
