@@ -34,7 +34,7 @@ HORARIOS_LIVRES_TOTAL = HORARIOS_LIVRES_MANHA + HORARIOS_LIVRES_TARDE
 HORARIOS_RESTRITOS = ["9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS"]
 
 CAIXAS_ESPECIAIS_LISTA = ["17", "16", "15", "01", "Self"] 
-CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] 
+CAIXAS_RESTRITOS_LISTA = [str(i) for i in range(2, 11)] # 02 ao 10
 
 # Grupos de Cores para o Excel
 H_VERMELHO = ["5:50 HRS", "6:30 HRS", "6:50 HRS"]
@@ -415,7 +415,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             
             with cols[i]:
                 st.caption(dia_label)
-                # CHAVE ÚNICA "MANUAL"
                 key_h = f"h_{colaborador}_{dia_atual.strftime('%Y%m%d')}"
                 val_h = st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=key_h, label_visibility="collapsed")
                 novos_horarios.append(val_h)
@@ -435,10 +434,10 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         st.markdown("")
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                st.cache_data.clear() # CRÍTICO: LIMPA O CACHE
+                st.cache_data.clear() # Limpa cache da edição manual também
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
-# --- ABA ESCALA MÁGICA: FINALIZADA COM LÓGICA MANUAL ---
+# --- ABA ESCALA MÁGICA: FINALIZADA COM LIMPEZA DE CACHE NA TROCA ---
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("✨ Escala Mágica (Beta)")
@@ -457,34 +456,37 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         nomes = sorted(df_ops['nome'].unique())
         colaborador = st.selectbox("Selecione o Operador:", nomes)
 
+    # --- O PULO DO GATO: FORÇA LIMPEZA SE MUDOU USER/SEMANA ---
+    if "user_magico_atual" not in st.session_state: st.session_state.user_magico_atual = ""
+    if "week_magico_atual" not in st.session_state: st.session_state.week_magico_atual = ""
+
+    if st.session_state.user_magico_atual != colaborador or st.session_state.week_magico_atual != semana_info['id']:
+        st.session_state.user_magico_atual = colaborador
+        st.session_state.week_magico_atual = semana_info['id']
+        st.session_state.sugestao_magica = {}
+        st.cache_data.clear() # LIMPA O BANCO VELHO DA MEMÓRIA
+        st.rerun() # RECARREGA A PÁGINA
+
     st.markdown("---")
 
     if semana_info and colaborador:
         id_semana = semana_info['id']
         data_ini = semana_info['data_inicio']
         
-        # Carrega dados do Banco
+        # Carrega dados do Banco (Agora sempre frescos graças ao clear acima)
         df_full = carregar_escala_semana_por_id(id_semana)
         escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
         
         horarios_atuais = {pd.to_datetime(row['data']).date(): row['horario'] for _, row in escala_colab.iterrows()}
         caixas_atuais = {pd.to_datetime(row['data']).date(): row['numero_caixa'] for _, row in escala_colab.iterrows()}
 
-        # Estado para controlar mudança de usuário
-        if "user_magico_atual" not in st.session_state: st.session_state.user_magico_atual = ""
-        
-        # Se mudou de usuário, limpa a sugestão mágica da memória
-        if st.session_state.user_magico_atual != colaborador:
-            st.session_state.sugestao_magica = {}
-            st.session_state.user_magico_atual = colaborador
-
-        # --- BOTÃO GERADOR ---
         st.markdown("### 🤖 Gerador Automático")
         col_btn, col_info = st.columns([2, 1])
         with col_btn:
             if st.button("🎲 Gerar Distribuição para esta pessoa", type="primary", use_container_width=True):
                 with st.spinner("Analisando Banco de Dados..."):
-                    ocupacao_semana = {} 
+                    # 1. Carrega Mapa de Ocupação Detalhado (Quem está onde e em qual horário)
+                    ocupacao_semana = {} # {data: {caixa: horario}}
                     try:
                         dados_semana_raw = supabase.rpc('get_escala_semana', {'p_semana_id': id_semana}).execute()
                         df_ocup = pd.DataFrame(dados_semana_raw.data)
@@ -505,15 +507,14 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
                     caixas_usados_pelo_user = []
                     dias_calculados = 0
-                    
-                    # Prepara a nova sugestão
-                    nova_sugestao = {}
 
                     for i in range(7):
                         dia_calc = data_ini + timedelta(days=i)
                         h_str = horarios_atuais.get(dia_calc, "")
 
+                        # Se não trabalha, pula
                         if h_str in ["", "Folga", "Ferias", "Atestado", "Afastado(a)"]:
+                            st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = "---" if h_str != "" else ""
                             continue
 
                         dias_calculados += 1
@@ -588,14 +589,11 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                                     if viz_esq == h_str or viz_dir == h_str: continue
                                 if c_cand in CAIXAS_ESPECIAIS_LISTA and h_str not in HORARIOS_LIVRES_TOTAL: continue
                                 pool_fallback.append(c_cand)
-                            
                             if pool_fallback: escolha = random.choice(pool_fallback)
                             else: escolha = str(random.randint(1, 15)) 
 
-                        nova_sugestao[dia_calc] = escolha
+                        st.session_state[f"cm_{i}_{colaborador}_{id_semana}"] = escolha
                         caixas_usados_pelo_user.append(escolha)
-                    
-                    st.session_state.sugestao_magica = nova_sugestao
                     
                     if dias_calculados == 0:
                         st.warning("Não encontrei horários no banco. Salve a escala primeiro.")
@@ -604,7 +602,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         time.sleep(0.5)
                         st.rerun()
 
-        # --- EXIBIÇÃO E FORMULÁRIO (Igual à aba Manual) ---
         with st.form("form_escala_magica"):
             cols = st.columns(7)
             novos_horarios = []
@@ -616,22 +613,16 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 
                 horario_banco = horarios_atuais.get(dia_atual, "")
                 
-                # Definição do Caixa:
-                # 1. Tenta pegar da sugestão mágica (se acabou de ser gerada)
-                # 2. Se não tiver, pega do banco
-                caixa_final = st.session_state.sugestao_magica.get(dia_atual, caixas_atuais.get(dia_atual, ""))
-                
-                # Calcular Índice
-                idx_c = 0
-                if caixa_final in LISTA_CAIXAS:
-                    idx_c = LISTA_CAIXAS.index(caixa_final)
+                caixa_inicial = caixas_atuais.get(dia_atual, "")
+                idx_c_inicial = 0
+                if caixa_inicial in LISTA_CAIXAS:
+                    idx_c_inicial = LISTA_CAIXAS.index(caixa_inicial)
 
                 idx_h = HORARIOS_PADRAO.index(horario_banco) if horario_banco in HORARIOS_PADRAO else 0
                 
                 with cols[i]:
                     st.caption(dia_label)
-                    # USANDO CHAVE ÚNICA COM NOME DO COLABORADOR E SEMANA (IGUAL MANUAL)
-                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"mag_h_{i}_{colaborador}_{id_semana}", disabled=True, label_visibility="collapsed")
+                    st.selectbox("H", HORARIOS_PADRAO, index=idx_h, key=f"hm_{i}_{colaborador}_{id_semana}", disabled=True, label_visibility="collapsed")
                     novos_horarios.append(horario_banco)
                     
                     val_c = None
@@ -639,16 +630,14 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         st.markdown("<div style='color: #aaa; text-align:center; font-size:14px; margin-top:5px;'>---</div>", unsafe_allow_html=True)
                         val_c = "---"
                     else:
-                        # USANDO CHAVE ÚNICA "MAG" PARA CAIXA
-                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c, key=f"mag_c_{i}_{colaborador}_{id_semana}", label_visibility="collapsed")
+                        val_c = st.selectbox("C", LISTA_CAIXAS, index=idx_c_inicial, key=f"cm_{i}_{colaborador}_{id_semana}", label_visibility="collapsed")
                     novos_caixas.append(val_c)
 
             st.markdown("")
             if st.form_submit_button("💾 Confirmar e Salvar no Banco", type="primary", use_container_width=True):
                 if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
-                    st.cache_data.clear() # LIMPA CACHE PARA ATUALIZAR OUTRAS TELAS
+                    st.cache_data.clear() 
                     st.success("Escala Mágica salva com sucesso!")
-                    st.session_state.sugestao_magica = {}
                     time.sleep(1.5)
                     st.rerun()
 
