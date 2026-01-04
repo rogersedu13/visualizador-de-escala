@@ -252,7 +252,7 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- FUNÇÕES DE IMPRESSÃO ---
 
-def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
+def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
     return f"""
     <!DOCTYPE html>
@@ -283,14 +283,33 @@ def gerar_html_escala(df_escala: pd.DataFrame, nome_colaborador: str, semana_str
     </html>
     """
 
-def gerar_html_diario(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str, dia_semana: str):
-    # Converte os DataFrames em HTML usando o mesmo estilo base
-    # Mas ajustado para duas colunas
+# NOVA FUNÇÃO: Gera o HTML no estilo "Foto da Parede" (Lista Simples)
+def gerar_html_diario_estilo_foto(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str, dia_semana: str):
     
-    # Adicionar classes CSS para controle fino
-    html_ops = df_ops.to_html(index=False, border=0, classes="tabela-escala", justify="center")
-    html_emp = df_emp.to_html(index=False, border=0, classes="tabela-escala", justify="center")
+    # 1. Constrói a lista de Operadoras (HTML cru, sem tabela)
+    html_ops_list = ""
+    for _, row in df_ops.iterrows():
+        nome = row['nome']
+        horario = row['horario']
+        caixa = row.get('numero_caixa', '')
 
+        # Formato: NOME - HORARIO [ - CAIXA]
+        linha = f"<strong>{nome}</strong> - {horario}"
+        if caixa and caixa.strip() != "":
+                linha += f" - <strong>CX {caixa}</strong>"
+        
+        html_ops_list += f"<div class='lista-item'>{linha}</div>"
+
+    # 2. Constrói a lista de Empacotadores
+    html_emp_list = ""
+    for _, row in df_emp.iterrows():
+        nome = row['nome']
+        horario = row['horario']
+        # Formato: NOME - HORARIO
+        linha = f"<strong>{nome}</strong> - {horario}"
+        html_emp_list += f"<div class='lista-item'>{linha}</div>"
+
+    # 3. O HTML completo com CSS simplificado (estilo "papel de parede")
     return f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -298,97 +317,60 @@ def gerar_html_diario(df_ops: pd.DataFrame, df_emp: pd.DataFrame, data_str: str,
         <meta charset="UTF-8">
         <title>Escala Diária - {data_str}</title>
         <style>
-            body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }}
+            /* Fonte simples e escura para impressão nítida */
+            body {{ font-family: Arial, sans-serif; background-color: white; margin: 30px; color: #000; }}
             
-            /* Container Principal (A4 simulado) */
-            .page-container {{
-                background-color: white;
-                padding: 40px;
-                border-radius: 8px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-                width: 100%;
-                max-width: 1000px;
-                margin: 0 auto;
-            }}
+            /* Header grandão e simples igual da foto */
+            .header-top {{ text-align: center; font-size: 26px; font-weight: bold; margin-bottom: 40px; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 10px; }}
 
-            /* Cabeçalho */
-            .header {{ text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2c3e50; padding-bottom: 15px; }}
-            .header h1 {{ color: #2c3e50; font-size: 28px; margin: 0; text-transform: uppercase; letter-spacing: 2px; }}
-            .header h2 {{ color: #7f8c8d; font-size: 18px; margin: 5px 0 0 0; font-weight: normal; }}
-
-            /* Layout de Colunas (Lado a Lado) */
-            .row {{ display: flex; justify-content: space-between; gap: 40px; }}
+            /* Layout de duas colunas lado a lado */
+            .main-container {{ display: flex; justify-content: space-between; gap: 50px; }}
             .column {{ width: 48%; }}
 
-            /* Títulos das Colunas */
-            h3 {{ 
-                background-color: #34495e; 
-                color: white; 
-                padding: 12px; 
-                text-align: center; 
-                margin-top: 0; 
-                margin-bottom: 0; 
-                text-transform: uppercase; 
-                font-size: 16px; 
-                border-top-left-radius: 4px; 
-                border-top-right-radius: 4px;
-                letter-spacing: 1px;
-            }}
-
-            /* Estilo das Tabelas (Mesmo da Semanal) */
-            table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
-            
-            /* Cabeçalho da Tabela */
-            table.tabela-escala th {{ 
-                background-color: #ecf0f1; 
-                color: #2c3e50; 
-                padding: 10px; 
-                font-size: 13px; 
-                font-weight: bold;
-                border-bottom: 2px solid #bdc3c7;
+            /* Títulos das colunas (OPERADORAS / EMPACOTADORES) */
+            .col-title {{ 
+                font-size: 20px; 
+                font-weight: bold; 
+                text-decoration: underline; 
+                margin-bottom: 20px; 
                 text-transform: uppercase;
             }}
-            
-            /* Células */
-            table.tabela-escala td {{ 
-                padding: 10px; 
-                border-bottom: 1px solid #eee; 
-                color: #333; 
-                font-size: 14px; 
-                text-align: center;
+
+            /* Itens da lista (cada pessoa) */
+            .lista-item {{ 
+                margin-bottom: 10px; 
+                font-size: 15px; 
+                /* border-bottom: 1px dotted #ccc;  Opcional: linha pontilhada entre nomes */
+                padding-bottom: 5px;
             }}
             
-            table.tabela-escala tr:last-child td {{ border-bottom: none; }}
-            table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            /* Nomes e Caixas em Negrito */
+            .lista-item strong {{ font-weight: bold; }}
 
-            /* Impressão */
+            /* Ajustes específicos para quando for imprimir de verdade */
             @media print {{
-                body {{ background-color: white; padding: 0; margin: 0; }}
-                .page-container {{ box-shadow: none; padding: 20px; max-width: 100%; width: 100%; }}
-                h3 {{ background-color: #34495e !important; color: white !important; -webkit-print-color-adjust: exact; }}
-                th {{ background-color: #ecf0f1 !important; -webkit-print-color-adjust: exact; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9 !important; -webkit-print-color-adjust: exact; }}
-                .row {{ display: flex; gap: 20px; }}
+                body {{ margin: 0; padding: 20px; }}
+                .main-container {{ gap: 30px; }}
                 .column {{ width: 49%; }}
+                /* Força o preto e branco real */
+                * {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; color: #000 !important; }}
             }}
         </style>
     </head>
     <body>
-        <div class="page-container">
-            <div class="header">
-                <h1>Escala Diária</h1>
-                <h2>{dia_semana} - {data_str}</h2>
+        <div class="header-top">
+            {dia_semana} - {data_str}
+        </div>
+
+        <div class="main-container">
+            <div class="column">
+                <div class="col-title">OPERADORAS</div>
+                {html_ops_list}
             </div>
             
-            <div class="row">
-                <div class="column">
-                    <h3>Operadoras</h3>
-                    {html_ops}
-                </div>
-                <div class="column">
-                    <h3>Empacotadores</h3>
-                    {html_emp}
-                </div>
+            <div class="column">
+                <div class="col-title">EMPACOTADORES</div>
+                {html_emp_list}
             </div>
         </div>
     </body>
@@ -435,7 +417,8 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
 
                     st.dataframe(display[cols_renamed], use_container_width=True, hide_index=True)
                     
-                    html = gerar_html_escala(display[cols_renamed], nome_selecionado, semana_str)
+                    # Usa a função da escala SEMANAL aqui
+                    html = gerar_html_escala_semanal(display[cols_renamed], nome_selecionado, semana_str)
                     b64 = base64.b64encode(html.encode('utf-8')).decode()
                     nome_arq = f"escala_{nome_selecionado.strip().replace(' ','_')}.html"
                     st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="{nome_arq}" style="background-color:#0068c9;color:white;padding:0.5em;text-decoration:none;border-radius:5px;">🖨️ Baixar para Impressão</a>', unsafe_allow_html=True)
@@ -789,11 +772,11 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                         time.sleep(1)
                         st.rerun()
 
-# --- ABA DE ESCALA DIÁRIA (NOVA) ---
+# --- ABA DE ESCALA DIÁRIA (IMPRESSÃO ESTILO FOTO) ---
 @st.fragment
 def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("🖨️ Escala Diária (Impressão)")
-    st.info("Selecione a semana e o dia específico para editar e imprimir a escala diária.")
+    st.info("Selecione a semana e o dia específico para editar e imprimir a escala diária no formato de lista.")
 
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
@@ -824,7 +807,6 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
         df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
 
     # 4. Separar Operadoras e Empacotadores
-    # Garantir que todos os colaboradores apareçam, mesmo sem horário salvo
     df_ops_base = df_colaboradores[df_colaboradores['funcao'] == 'Operador(a) de Caixa']
     df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
 
@@ -841,53 +823,37 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     
     with c1:
         st.markdown("### 🛒 Operadoras")
-        # Editor para Operadoras (Nome, Horário, Caixa)
         df_ops_edited = st.data_editor(
             df_ops_final[['nome', 'horario', 'numero_caixa']],
-            column_config={
-                "nome": "Nome",
-                "horario": "Horário",
-                "numero_caixa": "Caixa"
-            },
-            hide_index=True,
-            use_container_width=True,
-            key=f"editor_ops_{data_selecionada}"
+            column_config={"nome": "Nome", "horario": "Horário", "numero_caixa": "Caixa"},
+            hide_index=True, use_container_width=True, key=f"editor_ops_{data_selecionada}"
         )
 
     with c2:
         st.markdown("### 📦 Empacotadores")
-        # Editor para Empacotadores (Nome, Horário)
         df_emp_edited = st.data_editor(
             df_emp_final[['nome', 'horario']],
-            column_config={
-                "nome": "Nome",
-                "horario": "Horário"
-            },
-            hide_index=True,
-            use_container_width=True,
-            key=f"editor_emp_{data_selecionada}"
+            column_config={"nome": "Nome", "horario": "Horário"},
+            hide_index=True, use_container_width=True, key=f"editor_emp_{data_selecionada}"
         )
 
     st.markdown("---")
     
-    # 6. Botão de Gerar Impressão
-    if st.button("🖨️ Gerar Visualização de Impressão", type="primary"):
-        # Filtra apenas quem tem horário definido para a impressão ficar limpa
+    # 6. Botão de Gerar Impressão (ESTILO FOTO)
+    if st.button("🖨️ Gerar Impressão (Estilo Lista)", type="primary"):
+        # Filtra apenas quem tem horário
         df_ops_print = df_ops_edited[df_ops_edited['horario'] != ""].copy()
         df_emp_print = df_emp_edited[df_emp_edited['horario'] != ""].copy()
         
-        # Renomear para ficar bonito na tabela
-        df_ops_print.rename(columns={"horario": "Horário", "numero_caixa": "Caixa"}, inplace=True)
-        df_emp_print.rename(columns={"horario": "Horário"}, inplace=True)
-
-        html_content = gerar_html_diario(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
+        # Usa a NOVA função de estilo foto
+        html_content = gerar_html_diario_estilo_foto(df_ops_print, df_emp_print, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
         
         # Link de download
-        st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_lista_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
         
-        # Preview rápido (opcional, apenas para confirmação visual)
-        with st.expander("Pré-visualização (Simplificada)"):
+        # Preview rápido
+        with st.expander("Pré-visualização"):
             st.components.v1.html(html_content, height=600, scrolling=True)
 
 # --- Main ---
