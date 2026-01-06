@@ -368,8 +368,18 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
         if rows_html != "":
-            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
-            rows_html += "<tr class='spacer-row'><td colspan='6'></td></tr>"
+            # --- CORREÇÃO DA DIVISÓRIA CORTADA ---
+            # Em vez de uma única célula colspan=6, usamos 3 células:
+            # 1. Espaço Esquerdo (cinza)
+            # 2. Divisória Central (cor do tema)
+            # 3. Espaço Direito (cinza)
+            rows_html += f"""
+            <tr class='spacer-row'>
+                <td class='spacer-content' colspan='3'></td>
+                <td class='spacer-divider'></td>
+                <td class='spacer-content' colspan='2'></td>
+            </tr>
+            """
 
         for idx, (op, emp) in enumerate(zipped):
             # Op
@@ -465,16 +475,17 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
+                text-align: center; /* CENTRALIZAÇÃO GERAL DE TODOS OS TEXTOS */
             }}
             
             /* LARGURAS PARA CENTRALIZAR A DIVISÓRIA */
             /* ESQUERDA: 8% + 31.5% + 10% = 49.5% */
-            .cx-col {{ width: 8%; text-align: center; font-weight: bold; font-size: 16px; }}
-            .col-op-nome {{ width: 31.5%; text-align: center; font-weight: bold; font-size: 15px; }}
-            .horario-col {{ width: 10%; text-align: center; font-weight: bold; font-size: 15px; }}
+            .cx-col {{ width: 8%; font-weight: bold; font-size: 16px; }}
+            .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 15px; }}
+            .horario-col {{ width: 10%; font-weight: bold; font-size: 15px; }}
             
             /* MEIO: 1% */
-            .divider-col {{
+            .divider-col, .spacer-divider {{
                 width: 1%;
                 background-color: {cor_tema} !important;
                 padding: 0;
@@ -483,13 +494,16 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             }}
 
             /* DIREITA: 39.5% + 10% = 49.5% */
-            .col-emp-nome {{ width: 39.5%; text-align: center; font-weight: bold; font-size: 15px; }}
+            .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 15px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
             
             .border-left {{ border-left: 3px solid {cor_tema}; }}
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
+            
+            /* ESTILO PARA AS CÉLULAS CINZAS DO SPACER */
+            .spacer-content {{ background-color: #999 !important; height: 3px; padding:0; -webkit-print-color-adjust: exact; }}
 
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
@@ -503,7 +517,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 body {{ padding: 0; margin: 0; width: 100%; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
-                .spacer-row td {{ background-color: #999 !important; }}
+                .spacer-content {{ background-color: #999 !important; }}
             }}
         </style>
     </head>
