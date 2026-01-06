@@ -40,7 +40,7 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Vasilhame", 
     "Devolução", 
     "Carrinho", 
-    "Varrer Baias",
+    "Varrer Baias", 
     "Recolher Cestas"
 ]
 
@@ -170,7 +170,6 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
                 caixa = None
-                
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
                     if col_idx + 1 < len(df_excel.columns):
@@ -438,7 +437,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 margin-bottom: 3px;
             }}
             .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
-            .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; color: {cor_tema}; }}
+            .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; color: #000; }}
 
             table {{ width: 100%; border-collapse: collapse; border: 2px solid {cor_tema}; margin-bottom: 2px; }}
             
@@ -501,7 +500,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     <body>
         <div class="header-main">
             <div class="header-dia">{dia_semana.split('-')[0]}</div>
-            <div class="header-data">DATA: {data_str}</div>
+            <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
         </div>
 
         <table>
