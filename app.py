@@ -40,7 +40,7 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Vasilhame", 
     "Devolução", 
     "Carrinho", 
-    "Varrer Baias",
+    "Varrer Baias", 
     "Recolher Cestas"
 ]
 
@@ -439,7 +439,13 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
             .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; color: #000; }}
 
-            table {{ width: 100%; border-collapse: collapse; border: 2px solid {cor_tema}; margin-bottom: 2px; }}
+            table {{ 
+                width: 100%; 
+                border-collapse: collapse; 
+                border: 2px solid {cor_tema}; 
+                margin-bottom: 2px; 
+                table-layout: fixed; /* GARANTE QUE A DIVISÓRIA FIQUE FIXA */
+            }}
             
             thead th {{ 
                 background-color: {cor_tema} !important; 
@@ -461,21 +467,25 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 overflow: hidden;
             }}
             
-            /* ESTILO DA COLUNA DIVISÓRIA COM A COR DO TEMA */
+            /* LARGURAS PARA CENTRALIZAR A DIVISÓRIA */
+            /* ESQUERDA: 8% + 31.5% + 10% = 49.5% */
+            .cx-col {{ width: 8%; text-align: center; font-weight: bold; font-size: 16px; }}
+            .col-op-nome {{ width: 31.5%; text-align: center; font-weight: bold; font-size: 15px; }}
+            .horario-col {{ width: 10%; text-align: center; font-weight: bold; font-size: 15px; }}
+            
+            /* MEIO: 1% */
             .divider-col {{
-                width: 8px;
+                width: 1%;
                 background-color: {cor_tema} !important;
                 padding: 0;
                 border: none;
                 -webkit-print-color-adjust: exact;
             }}
-            
-            .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid {cor_tema}; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .cx-col {{ width: 60px; text-align: center; font-weight: bold; font-size: 16px; }} /* MAIOR */
-            .horario-col {{ width: 70px; text-align: center; font-weight: bold; font-size: 15px; }} /* MAIOR */
+            /* DIREITA: 39.5% + 10% = 49.5% */
+            .col-emp-nome {{ width: 39.5%; text-align: center; font-weight: bold; font-size: 15px; }}
             
-            .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; font-size: 15px; }} /* MAIOR */
+            .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
             
             .border-left {{ border-left: 3px solid {cor_tema}; }}
 
@@ -499,17 +509,18 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     </head>
     <body>
         <div class="header-main">
-            <div class="header-dia">{dia_semana}</div> <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
+            <div class="header-dia">{dia_semana}</div>
+            <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
         </div>
 
         <table>
             <thead>
                 <tr>
                     <th class="cx-col">CX</th>
-                    <th>OPERADOR(A)</th>
+                    <th class="col-op-nome">OPERADOR(A)</th>
                     <th class="horario-col">HORÁRIO</th>
                     <th class="divider-col"></th>
-                    <th class="border-left">EMPACOTADOR(A)</th>
+                    <th class="col-emp-nome border-left">EMPACOTADOR(A)</th>
                     <th class="horario-col">HORÁRIO</th>
                 </tr>
             </thead>
