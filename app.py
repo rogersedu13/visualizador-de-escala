@@ -40,7 +40,7 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Vasilhame", 
     "Devolução", 
     "Carrinho", 
-    "Varrer Baias", 
+    "Varrer Baias",
     "Recolher Cestas"
 ]
 
@@ -426,7 +426,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 11px;
+                font-size: 14px; /* AUMENTADO PARA DAR MAIS DESTAQUE */
                 width: 100%;
             }}
             
@@ -444,18 +444,18 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             thead th {{ 
                 background-color: {cor_tema} !important; 
                 color: #fff !important; 
-                padding: 3px; 
+                padding: 6px; 
                 text-transform: uppercase; 
                 border: 1px solid {cor_tema}; 
-                font-size: 13px;
+                font-size: 16px; /* CABEÇALHO MAIOR */
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
             
             td {{ 
-                padding: 1px 4px; 
+                padding: 4px; 
                 border: 1px solid {cor_tema}; 
-                height: 16px; 
+                height: 24px; /* ALTURA AUMENTADA PARA ACOMPANHAR A FONTE */
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
@@ -472,10 +472,10 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid {cor_tema}; padding:0; -webkit-print-color-adjust: exact; }}
 
-            .cx-col {{ width: 45px; text-align: center; font-weight: bold; font-size: 13px; }}
-            .horario-col {{ width: 55px; text-align: center; font-weight: bold; font-size: 11px; }}
+            .cx-col {{ width: 60px; text-align: center; font-weight: bold; font-size: 16px; }} /* MAIOR */
+            .horario-col {{ width: 70px; text-align: center; font-weight: bold; font-size: 15px; }} /* MAIOR */
             
-            .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
+            .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; font-size: 15px; }} /* MAIOR */
             
             .border-left {{ border-left: 3px solid {cor_tema}; }}
 
@@ -483,11 +483,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
-            .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
+            .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 14px; padding: 4px; -webkit-print-color-adjust: exact; }}
+            .footer-content {{ background: #eee !important; font-size: 12px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
             
             .totals-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; background: {cor_tema} !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
-            .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
+            .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
 
             @media print {{
                 body {{ padding: 0; margin: 0; width: 100%; }}
@@ -499,8 +499,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     </head>
     <body>
         <div class="header-main">
-            <div class="header-dia">{dia_semana.split('-')[0]}</div>
-            <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
+            <div class="header-dia">{dia_semana}</div> <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
         </div>
 
         <table>
