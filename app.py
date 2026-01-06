@@ -271,8 +271,8 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     </html>
     """
 
-# --- NOVA FUNÇÃO: LAYOUT IDÊNTICO ÀS FOTOS + LÓGICA DE GRUPOS ---
-def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
+# --- NOVA FUNÇÃO: LAYOUT IDÊNTICO ÀS FOTOS + LÓGICA DE GRUPOS + COR DINÂMICA ---
+def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_tema):
     
     lista_op_folga = []
     lista_emp_folga = []
@@ -433,21 +433,21 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             
             .header-main {{ 
                 text-align: center;
-                border-bottom: 3px solid #000; 
+                border-bottom: 3px solid {cor_tema}; 
                 padding-bottom: 5px; 
                 margin-bottom: 3px;
             }}
             .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
-            .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; }}
+            .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; color: {cor_tema}; }}
 
-            table {{ width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 2px; }}
+            table {{ width: 100%; border-collapse: collapse; border: 2px solid {cor_tema}; margin-bottom: 2px; }}
             
             thead th {{ 
-                background-color: #222 !important; 
+                background-color: {cor_tema} !important; 
                 color: #fff !important; 
                 padding: 3px; 
                 text-transform: uppercase; 
-                border: 1px solid #000; 
+                border: 1px solid {cor_tema}; 
                 font-size: 13px;
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
@@ -455,44 +455,44 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             
             td {{ 
                 padding: 1px 4px; 
-                border: 1px solid #000; 
+                border: 1px solid {cor_tema}; 
                 height: 16px; 
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
             }}
             
-            /* ESTILO DA COLUNA DIVISÓRIA */
+            /* ESTILO DA COLUNA DIVISÓRIA COM A COR DO TEMA */
             .divider-col {{
                 width: 8px;
-                background-color: #000 !important;
+                background-color: {cor_tema} !important;
                 padding: 0;
                 border: none;
                 -webkit-print-color-adjust: exact;
             }}
             
-            .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
+            .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid {cor_tema}; padding:0; -webkit-print-color-adjust: exact; }}
 
             .cx-col {{ width: 45px; text-align: center; font-weight: bold; font-size: 13px; }}
             .horario-col {{ width: 55px; text-align: center; font-weight: bold; font-size: 11px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; text-align: center; letter-spacing: -0.5px; }}
             
-            .border-left {{ border-left: 3px solid #000; }}
+            .border-left {{ border-left: 3px solid {cor_tema}; }}
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
 
-            .footer-container {{ display: flex; border: 2px solid #000; border-top: none; }}
+            .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
-            .footer-header {{ background: #222 !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
+            .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 12px; padding: 2px; -webkit-print-color-adjust: exact; }}
             .footer-content {{ background: #eee !important; font-size: 10px; padding: 4px; text-align: center; min-height: 30px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
             
-            .totals-container {{ display: flex; border: 2px solid #000; border-top: none; background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
+            .totals-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; background: {cor_tema} !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
             .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
 
             @media print {{
                 body {{ padding: 0; margin: 0; width: 100%; }}
-                thead th, .footer-header, .totals-container {{ background-color: #000 !important; color: #fff !important; }}
+                thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
                 .spacer-row td {{ background-color: #999 !important; }}
             }}
@@ -521,7 +521,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         </table>
 
         <div class="footer-container">
-            <div class="footer-box" style="border-right: 2px solid #000;">
+            <div class="footer-box" style="border-right: 2px solid {cor_tema};">
                 <div class="footer-header">FOLGAS OPERADORES</div>
                 <div class="footer-content">{str_folga_op}</div>
             </div>
@@ -996,6 +996,10 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
 
     st.markdown("---")
 
+    col_cor, col_rest = st.columns([1, 5])
+    with col_cor:
+        cor_tema = st.color_picker("Cor do Tema", "#000000")
+
     df_full = carregar_escala_semana_por_id(id_semana)
     df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
     if df_dia.empty: df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
@@ -1028,8 +1032,7 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     st.markdown("---")
     
     if st.button("🖨️ Gerar Impressão", type="primary"):
-        # Passa os DataFrames SEM filtrar, a função de impressão fará a separação Folga/Trabalho
-        html_content = gerar_html_layout_exato(df_ops_edited, df_emp_edited, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome)
+        html_content = gerar_html_layout_exato(df_ops_edited, df_emp_edited, data_selecionada.strftime('%d/%m/%Y'), dia_semana_nome, cor_tema)
         b64 = base64.b64encode(html_content.encode('utf-8')).decode()
         st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="escala_diaria_{data_selecionada.strftime("%d_%m")}.html" style="background-color:#0068c9;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;">📥 Baixar Arquivo de Impressão</a>', unsafe_allow_html=True)
         with st.expander("Pré-visualização"): st.components.v1.html(html_content, height=600, scrolling=True)
