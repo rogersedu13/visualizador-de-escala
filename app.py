@@ -31,8 +31,8 @@ H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
 # --- LISTAS ESPECÍFICAS POR FUNÇÃO ---
-# Para Operadoras (Caixas + Funções de Operadora)
-LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery"] + [str(i) for i in range(1, 18)]
+# Adicionado "Magazine" na lista
+LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine"] + [str(i) for i in range(1, 18)]
 
 # Para Empacotadores (Tarefas)
 LISTA_TAREFAS_EMPACOTADOR = [
@@ -171,14 +171,17 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                 if pd.isna(horario): horario = ""
                 horario = str(horario).strip()
                 caixa = None
+                
                 try:
                     col_idx = df_excel.columns.get_loc(data_str_header)
-                    # Verifica a próxima coluna para ver se tem tarefa/caixa
                     if col_idx + 1 < len(df_excel.columns):
-                        val_caixa = row.iloc[col_idx + 1]
-                        if not pd.isna(val_caixa):
-                            caixa = str(val_caixa).strip().replace(".0", "")
-                except: caixa = None
+                        prox_col_nome = str(df_excel.columns[col_idx + 1]).upper()
+                        if "CX" in prox_col_nome or "TAREFA" in prox_col_nome:
+                            val_caixa = row.iloc[col_idx + 1]
+                            if not pd.isna(val_caixa):
+                                caixa = str(val_caixa).strip().replace(".0", "")
+                except: 
+                    caixa = None
                 
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
                 supabase.rpc('save_escala_dia_final', {'p_nome': nome_limpo, 'p_data': data_banco, 'p_horario': horario, 'p_caixa': caixa, 'p_semana_id': id_semana}).execute()
@@ -308,9 +311,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
         
-        # Filtro de Contagem: Recepção e Delivery NÃO contam
+        # Filtro de Contagem: Recepção, Delivery e MAGAZINE NÃO contam
         cx_upper = cx.upper()
-        is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY"])
+        is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE"])
 
         if mins <= 630: 
             if is_self: c_self_manha += 1
@@ -373,14 +376,14 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             # Op
             if op:
                 cx_display = op['cx']
-                op_content = f"{op['nome']}" # REMOVIDO H_CLEAN
+                op_content = f"{op['nome']}" 
                 op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td><td class='horario-col'>{op['h_clean']}</td>"
             else:
                 op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
             
             # Emp
             if emp:
-                emp_content = f"{emp['nome']}" # REMOVIDO H_CLEAN
+                emp_content = f"{emp['nome']}"
                 emp_html = f"<td class='nome-col border-left'>{emp_content}</td><td class='horario-col'>{emp['h_clean']}</td>"
             else:
                 emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
@@ -412,6 +415,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap');
             
+            @page {{ 
+                size: portrait; 
+                margin: 5mm; 
+            }}
+
             body {{ 
                 font-family: 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif; 
                 color: #000; 
@@ -419,6 +427,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 padding: 10px; 
                 background: white; 
                 font-size: 11px;
+                width: 100%;
             }}
             
             .header-main {{ 
@@ -472,7 +481,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             .totals-box {{ width: 50%; font-size: 11px; font-weight: bold; padding: 4px; text-align: center; line-height: 1.3; }}
 
             @media print {{
-                body {{ padding: 0; margin: 0; }}
+                body {{ padding: 0; margin: 0; width: 100%; }}
                 thead th, .footer-header, .totals-container {{ background-color: #000 !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
                 .spacer-row td {{ background-color: #999 !important; }}
@@ -845,15 +854,15 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
-                        # LOGICA CONDICIONAL DE CONTAGEM PARA EXCEL (EXCLUIR RECEPÇÃO/DELIVERY)
+                        # LOGICA CONDICIONAL DE CONTAGEM PARA EXCEL (EXCLUIR RECEPÇÃO/DELIVERY/MAGAZINE)
                         if is_op:
                             # A coluna CX está em current_col + 1
                             letra_cx = num_to_col(current_col + 1)
                             rng_cx = f"{letra_cx}2:{letra_cx}{last_data_row+1}"
                             
-                            # COUNTIFS(RangeHorario, Horario, RangeCX, "<>Recepção", RangeCX, "<>Delivery")
-                            crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery")' for h in HORARIOS_MANHA])
-                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery")' for h in HORARIOS_TARDE])
+                            # Adicionado MAGAZINE na exclusão
+                            crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_MANHA])
+                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_TARDE])
                         else:
                             # Contagem simples para empacotadores (ou outras funções)
                             crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
