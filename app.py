@@ -31,7 +31,6 @@ H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
 # --- LISTAS ESPECÍFICAS POR FUNÇÃO ---
-# Adicionado "Magazine" na lista
 LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine"] + [str(i) for i in range(1, 18)]
 
 # Para Empacotadores (Tarefas)
@@ -370,7 +369,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
         if rows_html != "":
-            rows_html += "<tr class='spacer-row'><td colspan='5'></td></tr>"
+            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
+            rows_html += "<tr class='spacer-row'><td colspan='6'></td></tr>"
 
         for idx, (op, emp) in enumerate(zipped):
             # Op
@@ -388,7 +388,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
             else:
                 emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
             
-            rows_html += f"<tr>{op_html}{emp_html}</tr>"
+            # ADICIONADA A COLUNA DIVISÓRIA NO MEIO
+            rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
 
     str_folga_op = formatar_lista_folgas_multilinha(lista_op_folga, step=2)
     str_folga_emp = formatar_lista_folgas_multilinha(lista_emp_folga, step=2)
@@ -461,6 +462,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                 overflow: hidden;
             }}
             
+            /* ESTILO DA COLUNA DIVISÓRIA */
+            .divider-col {{
+                width: 8px;
+                background-color: #000 !important;
+                padding: 0;
+                border: none;
+                -webkit-print-color-adjust: exact;
+            }}
+            
             .spacer-row td {{ background-color: #999 !important; height: 3px; border: 1px solid #000; padding:0; -webkit-print-color-adjust: exact; }}
 
             .cx-col {{ width: 45px; text-align: center; font-weight: bold; font-size: 13px; }}
@@ -500,6 +510,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana):
                     <th class="cx-col">CX</th>
                     <th>OPERADOR(A)</th>
                     <th class="horario-col">HORÁRIO</th>
+                    <th class="divider-col"></th>
                     <th class="border-left">EMPACOTADOR(A)</th>
                     <th class="horario-col">HORÁRIO</th>
                 </tr>
