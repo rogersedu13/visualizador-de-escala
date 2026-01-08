@@ -368,11 +368,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
         if rows_html != "":
-            # --- CORREÇÃO DA DIVISÓRIA CORTADA ---
-            # Em vez de uma única célula colspan=6, usamos 3 células:
-            # 1. Espaço Esquerdo (cinza)
-            # 2. Divisória Central (cor do tema)
-            # 3. Espaço Direito (cinza)
+            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
             rows_html += f"""
             <tr class='spacer-row'>
                 <td class='spacer-content' colspan='3'></td>
@@ -436,8 +432,10 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 14px; /* AUMENTADO PARA DAR MAIS DESTAQUE */
-                width: 100%;
+                font-size: 14px; 
+                width: 85%; /* 85% DA FOLHA */
+                margin-left: auto; /* CENTRALIZAR NA FOLHA */
+                margin-right: auto; /* CENTRALIZAR NA FOLHA */
             }}
             
             .header-main {{ 
@@ -514,7 +512,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
 
             @media print {{
-                body {{ padding: 0; margin: 0; width: 100%; }}
+                body {{ padding: 0; margin: 0; width: 85%; margin-left: auto; margin-right: auto; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
                 .spacer-content {{ background-color: #999 !important; }}
