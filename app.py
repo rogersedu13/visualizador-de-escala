@@ -368,7 +368,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
         if rows_html != "":
-            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
+            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO (COM CORREÇÃO DO ZOOM E SPAN)
             rows_html += f"""
             <tr class='spacer-row'>
                 <td class='spacer-content' colspan='3'></td>
@@ -419,7 +419,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         <meta charset="UTF-8">
         <title>Escala {dia_semana}</title>
         <style>
-            @import url('[https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap](https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap)');
+            @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap');
             
             @page {{ 
                 size: portrait; 
@@ -436,7 +436,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 width: 90%; 
                 margin-left: auto; 
                 margin-right: auto;
-                zoom: 80%; /* REDUZ ESCALA PARA CABER EM 1 FOLHA E DEIXAR MARGEM */
+                zoom: 90%; /* ZOOOM AJUSTADO PARA 90% */
             }}
             
             .header-main {{ 
@@ -508,7 +508,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
 
             @media print {{
-                body {{ padding: 0; margin: 0 auto; width: 90%; zoom: 80%; }}
+                body {{ padding: 0; margin: 0 auto; width: 90%; zoom: 90%; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
                 .spacer-content {{ background-color: #999 !important; }}
