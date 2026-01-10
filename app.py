@@ -227,6 +227,30 @@ def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
+# --- NOVAS FUNÇÕES DE PEDIDOS ---
+def salvar_pedido(nome, texto):
+    try:
+        supabase.table('pedidos').insert({'nome': nome, 'descricao': texto}).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar pedido: {e}")
+        return False
+
+def carregar_pedidos():
+    try:
+        response = supabase.table('pedidos').select('*').order('created_at', desc=True).execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        return pd.DataFrame()
+
+def atualizar_status_pedido(id_pedido, novo_status):
+    try:
+        supabase.table('pedidos').update({'status': novo_status}).eq('id', id_pedido).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao atualizar: {e}")
+        return False
+
 @st.cache_data
 def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([
@@ -574,10 +598,34 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 @st.fragment
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("🔎 Visão Geral")
+    
+    # --- ÁREA DE PEDIDOS PÚBLICA ---
+    with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
+        if not df_colaboradores.empty:
+            nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
+            c_p1, c_p2 = st.columns([1, 2])
+            with c_p1:
+                nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido, key="sel_nome_pedido")
+            with c_p2:
+                texto_pedido = st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
+            
+            if st.button("🚀 Enviar Pedido", type="primary"):
+                if texto_pedido:
+                    if salvar_pedido(nome_pedido, texto_pedido):
+                        st.success("Pedido enviado com sucesso! O fiscal irá analisar.")
+                        time.sleep(2)
+                        st.rerun()
+                else:
+                    st.warning("Escreva algo no pedido antes de enviar.")
+        else:
+            st.info("Cadastre colaboradores primeiro.")
+
+    st.markdown("---")
+
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
-    nome_selecionado = st.selectbox("1. Selecione seu nome:", options=nomes_disponiveis)
+    nome_selecionado = st.selectbox("1. Selecione seu nome para ver a escala:", options=nomes_disponiveis)
 
     if nome_selecionado:
         is_operador = False
@@ -1017,6 +1065,62 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                         time.sleep(1)
                         st.rerun()
 
+# --- ABA DE PEDIDOS ---
+@st.fragment
+def aba_gerenciar_pedidos():
+    st.subheader("📌 Gerenciar Pedidos e Solicitações")
+    st.info("Visualize os pedidos das operadoras e atualize o status.")
+    
+    df_pedidos = carregar_pedidos()
+    
+    if not df_pedidos.empty:
+        # Convert timestamp to something readable
+        df_pedidos['created_at'] = pd.to_datetime(df_pedidos['created_at']).dt.strftime('%d/%m/%Y %H:%M')
+        
+        # We need a copy to edit
+        df_editor = df_pedidos.copy()
+        
+        # Configure the data editor
+        edited_df = st.data_editor(
+            df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
+            column_config={
+                "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                "created_at": st.column_config.TextColumn("Data do Pedido", disabled=True),
+                "nome": st.column_config.TextColumn("Nome", disabled=True),
+                "descricao": st.column_config.TextColumn("Pedido/Solicitação", disabled=True, width="large"),
+                "status": st.column_config.SelectboxColumn(
+                    "Status",
+                    options=["Pendente", "Concluido"],
+                    required=True,
+                    width="medium"
+                )
+            },
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",
+            key="editor_pedidos"
+        )
+        
+        if st.button("💾 Salvar Status dos Pedidos", type="primary"):
+            # Compare edited_df with original df_pedidos to find changes
+            count = 0
+            for index, row in edited_df.iterrows():
+                original_status = df_pedidos.loc[df_pedidos['id'] == row['id'], 'status'].values[0]
+                if row['status'] != original_status:
+                    if atualizar_status_pedido(row['id'], row['status']):
+                        count += 1
+            
+            if count > 0:
+                st.success(f"{count} pedidos atualizados!")
+                time.sleep(1.5)
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.info("Nenhuma alteração detectada.")
+                
+    else:
+        st.info("Nenhum pedido encontrado.")
+
 # --- ABA DE ESCALA DIÁRIA (IMPRESSÃO ESTILO FOTO - PRETO E BRANCO) ---
 @st.fragment
 def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -1104,13 +1208,14 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5, t6 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
+        t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📌 Pedidos", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
-        with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas) 
-        with t4: aba_importar_excel(df_colaboradores, df_semanas_ativas)
-        with t5: aba_gerenciar_colaboradores(df_colaboradores)
-        with t6: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
+        with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas)
+        with t4: aba_gerenciar_pedidos() 
+        with t5: aba_importar_excel(df_colaboradores, df_semanas_ativas)
+        with t6: aba_gerenciar_colaboradores(df_colaboradores)
+        with t7: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
     else:
         aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
