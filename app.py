@@ -368,7 +368,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
         
         if rows_html != "":
-            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO (COM CORREÇÃO DO ZOOM E SPAN)
+            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
             rows_html += f"""
             <tr class='spacer-row'>
                 <td class='spacer-content' colspan='3'></td>
@@ -433,10 +433,17 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 10px; 
                 background: white; 
                 font-size: 14px; 
-                width: 90%; 
-                margin-left: auto; 
-                margin-right: auto;
+                width: 90%; /* 90% DA FOLHA */
+                margin-left: auto; /* CENTRALIZAR NA FOLHA */
+                margin-right: auto; /* CENTRALIZAR NA FOLHA */
                 zoom: 90%; /* ZOOOM AJUSTADO PARA 90% */
+            }}
+            
+            .print-frame {{
+                border: 4px solid {cor_tema}; /* MOLDURA EXTERNA */
+                padding: 15px; /* ESPAÇO ENTRE MOLDURA E CONTEÚDO */
+                width: 100%;
+                box-sizing: border-box; /* GARANTE QUE A BORDA NÃO QUEBRE O LAYOUT */
             }}
             
             .header-main {{ 
@@ -453,7 +460,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 border-collapse: collapse; 
                 border: 2px solid {cor_tema}; 
                 margin-bottom: 2px; 
-                table-layout: fixed; 
+                table-layout: fixed; /* GARANTE QUE A DIVISÓRIA FIQUE FIXA */
             }}
             
             thead th {{ 
@@ -462,7 +469,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 6px; 
                 text-transform: uppercase; 
                 border: 1px solid {cor_tema}; 
-                font-size: 16px; 
+                font-size: 16px; /* CABEÇALHO MAIOR */
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
@@ -470,17 +477,20 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             td {{ 
                 padding: 4px; 
                 border: 1px solid {cor_tema}; 
-                height: 24px; 
+                height: 24px; /* ALTURA AUMENTADA PARA ACOMPANHAR A FONTE */
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
-                text-align: center; 
+                text-align: center; /* CENTRALIZAÇÃO GERAL DE TODOS OS TEXTOS */
             }}
             
+            /* LARGURAS PARA CENTRALIZAR A DIVISÓRIA */
+            /* ESQUERDA: 8% + 31.5% + 10% = 49.5% */
             .cx-col {{ width: 8%; font-weight: bold; font-size: 16px; }}
             .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 15px; }}
             .horario-col {{ width: 10%; font-weight: bold; font-size: 15px; }}
             
+            /* MEIO: 1% */
             .divider-col, .spacer-divider {{
                 width: 1%;
                 background-color: {cor_tema} !important;
@@ -489,6 +499,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 -webkit-print-color-adjust: exact;
             }}
 
+            /* DIREITA: 39.5% + 10% = 49.5% */
             .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 15px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
@@ -497,6 +508,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
             
+            /* ESTILO PARA AS CÉLULAS CINZAS DO SPACER */
             .spacer-content {{ background-color: #999 !important; height: 3px; padding:0; -webkit-print-color-adjust: exact; }}
 
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
@@ -516,44 +528,46 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         </style>
     </head>
     <body>
-        <div class="header-main">
-            <div class="header-dia">{dia_semana}</div>
-            <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th class="cx-col">CX</th>
-                    <th class="col-op-nome">OPERADOR(A)</th>
-                    <th class="horario-col">HORÁRIO</th>
-                    <th class="divider-col"></th>
-                    <th class="col-emp-nome border-left">EMPACOTADOR(A)</th>
-                    <th class="horario-col">HORÁRIO</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-
-        <div class="footer-container">
-            <div class="footer-box" style="border-right: 2px solid {cor_tema};">
-                <div class="footer-header">FOLGAS OPERADORES</div>
-                <div class="footer-content">{str_folga_op}</div>
+        <div class="print-frame">
+            <div class="header-main">
+                <div class="header-dia">{dia_semana}</div>
+                <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
             </div>
-            <div class="footer-box">
-                <div class="footer-header">FOLGAS EMPACOTADORES</div>
-                <div class="footer-content">{str_folga_emp}</div>
-            </div>
-        </div>
 
-        <div class="totals-container">
-            <div class="totals-box" style="border-right: 1px solid #fff;">
-                {resumo_op}
+            <table>
+                <thead>
+                    <tr>
+                        <th class="cx-col">CX</th>
+                        <th class="col-op-nome">OPERADOR(A)</th>
+                        <th class="horario-col">HORÁRIO</th>
+                        <th class="divider-col"></th>
+                        <th class="col-emp-nome border-left">EMPACOTADOR(A)</th>
+                        <th class="horario-col">HORÁRIO</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+
+            <div class="footer-container">
+                <div class="footer-box" style="border-right: 2px solid {cor_tema};">
+                    <div class="footer-header">FOLGAS OPERADORES</div>
+                    <div class="footer-content">{str_folga_op}</div>
+                </div>
+                <div class="footer-box">
+                    <div class="footer-header">FOLGAS EMPACOTADORES</div>
+                    <div class="footer-content">{str_folga_emp}</div>
+                </div>
             </div>
-            <div class="totals-box">
-                {resumo_emp}
+
+            <div class="totals-container">
+                <div class="totals-box" style="border-right: 1px solid #fff;">
+                    {resumo_op}
+                </div>
+                <div class="totals-box">
+                    {resumo_emp}
+                </div>
             </div>
         </div>
     </body>
