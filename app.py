@@ -433,17 +433,17 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 10px; 
                 background: white; 
                 font-size: 14px; 
-                width: 90%; /* 90% DA FOLHA */
-                margin-left: auto; /* CENTRALIZAR NA FOLHA */
-                margin-right: auto; /* CENTRALIZAR NA FOLHA */
-                zoom: 90%; /* ZOOOM AJUSTADO PARA 90% */
+                width: 90%; 
+                margin-left: auto; 
+                margin-right: auto;
+                zoom: 90%; 
             }}
             
             .print-frame {{
                 border: 4px solid {cor_tema}; /* MOLDURA EXTERNA */
-                padding: 15px; /* ESPAÇO ENTRE MOLDURA E CONTEÚDO */
+                padding: 15px; 
                 width: 100%;
-                box-sizing: border-box; /* GARANTE QUE A BORDA NÃO QUEBRE O LAYOUT */
+                box-sizing: border-box;
             }}
             
             .header-main {{ 
@@ -460,7 +460,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 border-collapse: collapse; 
                 border: 2px solid {cor_tema}; 
                 margin-bottom: 2px; 
-                table-layout: fixed; /* GARANTE QUE A DIVISÓRIA FIQUE FIXA */
+                table-layout: fixed; 
             }}
             
             thead th {{ 
@@ -469,7 +469,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 6px; 
                 text-transform: uppercase; 
                 border: 1px solid {cor_tema}; 
-                font-size: 16px; /* CABEÇALHO MAIOR */
+                font-size: 16px; 
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
@@ -477,20 +477,17 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             td {{ 
                 padding: 4px; 
                 border: 1px solid {cor_tema}; 
-                height: 24px; /* ALTURA AUMENTADA PARA ACOMPANHAR A FONTE */
+                height: 24px; 
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
-                text-align: center; /* CENTRALIZAÇÃO GERAL DE TODOS OS TEXTOS */
+                text-align: center; 
             }}
             
-            /* LARGURAS PARA CENTRALIZAR A DIVISÓRIA */
-            /* ESQUERDA: 8% + 31.5% + 10% = 49.5% */
             .cx-col {{ width: 8%; font-weight: bold; font-size: 16px; }}
             .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 15px; }}
             .horario-col {{ width: 10%; font-weight: bold; font-size: 15px; }}
             
-            /* MEIO: 1% */
             .divider-col, .spacer-divider {{
                 width: 1%;
                 background-color: {cor_tema} !important;
@@ -499,7 +496,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 -webkit-print-color-adjust: exact;
             }}
 
-            /* DIREITA: 39.5% + 10% = 49.5% */
             .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 15px; }}
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
@@ -508,7 +504,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
             
-            /* ESTILO PARA AS CÉLULAS CINZAS DO SPACER */
             .spacer-content {{ background-color: #999 !important; height: 3px; padding:0; -webkit-print-color-adjust: exact; }}
 
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
@@ -808,6 +803,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    
+                    # FORMATO PARA ERRO DE DUPLICATA
+                    fmt_duplicata = workbook.add_format({'bg_color': '#FF0000', 'font_color': '#FFFFFF', 'bold': True, 'align': 'center'})
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
@@ -905,6 +903,19 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             # Adicionado MAGAZINE na exclusão
                             crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_MANHA])
                             crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_TARDE])
+                            
+                            # --- NOVO BLOQUEIO DE DUPLICIDADE (VERMELHO) ---
+                            # FORMULA INTELIGENTE: SÓ PINTA SE CAIXA E HORÁRIO FOREM IGUAIS
+                            # let's assume 'letra' is current_col (date header)
+                            # letra_h is actually 'letra' (horario column)
+                            # letra_cx is 'letra_cx' (cx column)
+                            
+                            # A fórmula precisa ser aplicada na coluna CX (rng_cx)
+                            # Formula: =COUNTIFS(Range_CX, Current_CX, Range_Horario, Current_Horario) > 1
+                            
+                            formula_dup = f'=COUNTIFS({rng_cx}, {letra_cx}2, {rng}, {letra}2) > 1'
+                            worksheet.conditional_format(rng_cx, {'type': 'formula', 'criteria': formula_dup, 'format': fmt_duplicata})
+
                         else:
                             # Contagem simples para empacotadores (ou outras funções)
                             crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
