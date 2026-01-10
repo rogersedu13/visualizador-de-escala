@@ -905,15 +905,17 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_TARDE])
                             
                             # --- NOVO BLOQUEIO DE DUPLICIDADE (VERMELHO) ---
-                            # FORMULA INTELIGENTE: SÓ PINTA SE CAIXA E HORÁRIO FOREM IGUAIS
-                            # let's assume 'letra' is current_col (date header)
-                            # letra_h is actually 'letra' (horario column)
-                            # letra_cx is 'letra_cx' (cx column)
+                            # FORMULA INTELIGENTE COM TRAVAMENTO DE INTERVALO ($)
                             
-                            # A fórmula precisa ser aplicada na coluna CX (rng_cx)
-                            # Formula: =COUNTIFS(Range_CX, Current_CX, Range_Horario, Current_Horario) > 1
+                            # 1. Definir intervalo absoluto (Travado com $)
+                            rng_abs = f"${letra}$2:${letra}${last_data_row+1}"
+                            rng_cx_abs = f"${letra_cx}$2:${letra_cx}${last_data_row+1}"
                             
-                            formula_dup = f'=COUNTIFS({rng_cx}, {letra_cx}2, {rng}, {letra}2) > 1'
+                            # 2. Definir célula relativa (Sem $)
+                            crit_cx = f"{letra_cx}2"
+                            crit_h = f"{letra}2"
+                            
+                            formula_dup = f'=COUNTIFS({rng_cx_abs}, {crit_cx}, {rng_abs}, {crit_h}) > 1'
                             worksheet.conditional_format(rng_cx, {'type': 'formula', 'criteria': formula_dup, 'format': fmt_duplicata})
 
                         else:
