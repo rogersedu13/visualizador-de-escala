@@ -599,31 +599,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("🔎 Visão Geral")
     
-    # --- ÁREA DE PEDIDOS PÚBLICA ---
-    with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
-        if not df_colaboradores.empty:
-            nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
-            c_p1, c_p2 = st.columns([1, 2])
-            with c_p1:
-                nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido, key="sel_nome_pedido")
-            with c_p2:
-                texto_pedido = st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
-            
-            if st.button("🚀 Enviar Pedido", type="primary"):
-                if texto_pedido:
-                    if salvar_pedido(nome_pedido, texto_pedido):
-                        st.success("Pedido enviado com sucesso! O fiscal irá analisar.")
-                        time.sleep(2)
-                        st.rerun()
-                else:
-                    st.warning("Escreva algo no pedido antes de enviar.")
-        else:
-            st.info("Cadastre colaboradores primeiro.")
-
-    st.markdown("---")
-
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
+    # --- 1. VISUALIZADOR DE ESCALA (EM CIMA) ---
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("1. Selecione seu nome para ver a escala:", options=nomes_disponiveis)
 
@@ -663,6 +641,26 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
                     st.markdown(f'<a href="data:text/html;charset=utf-8;base64,{b64}" download="{nome_arq}" style="background-color:#0068c9;color:white;padding:0.5em;text-decoration:none;border-radius:5px;">🖨️ Baixar para Impressão</a>', unsafe_allow_html=True)
                 else:
                     st.info("Sem horários para esta semana.")
+
+    st.markdown("---")
+
+    # --- 2. PEDIDOS (EM BAIXO) ---
+    with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
+        nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
+        c_p1, c_p2 = st.columns([1, 2])
+        with c_p1:
+            nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido, key="sel_nome_pedido")
+        with c_p2:
+            texto_pedido = st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
+        
+        if st.button("🚀 Enviar Pedido", type="primary"):
+            if texto_pedido:
+                if salvar_pedido(nome_pedido, texto_pedido):
+                    st.success("Pedido enviado com sucesso! O fiscal irá analisar.")
+                    time.sleep(2)
+                    st.rerun()
+            else:
+                st.warning("Escreva algo no pedido antes de enviar.")
 
 def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
     st.subheader("🗓️ Gerenciar Semanas")
