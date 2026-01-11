@@ -95,7 +95,11 @@ def carregar_colaboradores() -> pd.DataFrame:
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
+            # ALTERADO DE nome_curto PARA nome_social
+            if 'nome_social' not in df.columns: df['nome_social'] = None
+            
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
+            df['nome_social'] = df['nome_social'].fillna('')
         return df
     except Exception as e: 
         return pd.DataFrame()
@@ -124,9 +128,18 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
+                # Merge para pegar funcao e nome_social
+                cols_to_merge = ['nome', 'funcao']
+                # ALTERADO DE nome_curto PARA nome_social
+                if 'nome_social' in df_colabs.columns:
+                    cols_to_merge.append('nome_social')
+                
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
-                df = df.merge(df_colabs_unique[['nome', 'funcao']], on='nome', how='left')
+                df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
+                # ALTERADO DE nome_curto PARA nome_social
+                if 'nome_social' in df.columns:
+                    df['nome_social'] = df['nome_social'].fillna('')
         return df
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
@@ -221,9 +234,10 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
-def atualizar_funcao_colaborador(nome: str, nova_funcao: str):
+# ALTERADO DE nome_curto PARA nome_social
+def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str):
     try:
-        supabase.table('colaboradores').update({'funcao': nova_funcao}).eq('nome', nome).execute()
+        supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social}).eq('nome', nome).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -322,7 +336,16 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
     for _, row in df_ops_sorted.iterrows():
         horario = str(row['horario'])
-        nome = str(row['nome']).upper()
+        
+        # --- LÓGICA DE NOME PERSONALIZADO (NOVO) ---
+        # Prioriza o nome_impressao (que vem do banco como nome_social ou editado na hora)
+        if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
+            nome = str(row['nome_impressao']).upper()
+        elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
+            nome = str(row['nome_social']).upper()
+        else:
+            nome = str(row['nome']).upper()
+            
         cx = str(row.get('numero_caixa', '')).replace('.0', '')
         
         if horario in status_invisivel or horario == "nan": continue
@@ -354,7 +377,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
-        nome = str(row['nome']).upper()
+        
+        # --- LÓGICA DE NOME PERSONALIZADO (EMP) ---
+        if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
+            nome = str(row['nome_impressao']).upper()
+        elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
+            nome = str(row['nome_social']).upper()
+        else:
+            nome = str(row['nome']).upper()
+
         tarefa = str(row.get('numero_caixa', '')).replace('.0', '').strip()
         if tarefa == 'nan': tarefa = ""
 
@@ -601,7 +632,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
-    # --- 1. VISUALIZADOR DE ESCALA (EM CIMA) ---
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("1. Selecione seu nome para ver a escala:", options=nomes_disponiveis)
 
@@ -999,15 +1029,20 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     
     if not df_colaboradores.empty:
         mapa_original = {row['nome']: row['funcao'] for _, row in df_colaboradores.iterrows()}
+        # Mapa para nome social
+        mapa_social = {row['nome']: row['nome_social'] for _, row in df_colaboradores.iterrows()}
+        
         df_editor = df_colaboradores.copy()
         
         col_config = {
             "nome": st.column_config.TextColumn("Nome", disabled=True),
-            "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium")
+            "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium"),
+            # ALTERADO DE nome_curto PARA nome_social
+            "nome_social": st.column_config.TextColumn("Nome Social (Para Impressão)", width="medium")
         }
         
         df_editado = st.data_editor(
-            df_editor[['nome', 'funcao']], 
+            df_editor[['nome', 'funcao', 'nome_social']], 
             column_config=col_config, 
             use_container_width=True,
             key="editor_colabs",
@@ -1022,14 +1057,19 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             for index, row in df_editado.iterrows():
                 nome = row['nome']
                 nova_funcao = row['funcao']
+                novo_social = row['nome_social']
+                
                 funcao_antiga = mapa_original.get(nome, "")
-                if nova_funcao != funcao_antiga:
-                    atualizar_funcao_colaborador(nome, nova_funcao)
+                social_antigo = mapa_social.get(nome, "")
+                
+                if nova_funcao != funcao_antiga or novo_social != social_antigo:
+                    # ALTERADO DE nome_curto PARA nome_social
+                    atualizar_dados_colaborador(nome, nova_funcao, novo_social)
                     contador_updates += 1
                 if index % 5 == 0: barra.progress((index+1)/total)
             
             barra.empty()
-            if contador_updates > 0: st.success(f"{contador_updates} cargos atualizados!")
+            if contador_updates > 0: st.success(f"{contador_updates} colaboradores atualizados!")
             else: st.info("Nenhuma alteração.")
             time.sleep(1); st.cache_data.clear(); st.rerun()
     else:
@@ -1159,19 +1199,47 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     df_ops_final = df_ops_final.sort_values('nome')
     df_emp_final = df_emp_final.sort_values('nome')
 
+    # ADD EDITABLE PRINT NAME COLUMN
+    # Logic: If 'nome_social' exists in DB (merged), use it. Otherwise use 'nome'.
+    
+    # Ensure columns exist even if merge failed slightly
+    if 'nome_social' not in df_ops_final.columns: df_ops_final['nome_social'] = ""
+    if 'nome_social' not in df_emp_final.columns: df_emp_final['nome_social'] = ""
+
+    # Pre-fill 'nome_impressao' based on 'nome_social'
+    df_ops_final['nome_impressao'] = df_ops_final.apply(
+        lambda row: row['nome_social'] if pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "" else row['nome'], 
+        axis=1
+    )
+    
+    df_emp_final['nome_impressao'] = df_emp_final.apply(
+        lambda row: row['nome_social'] if pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "" else row['nome'], 
+        axis=1
+    )
+
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("### 🛒 Operadoras")
         df_ops_edited = st.data_editor(
-            df_ops_final[['nome', 'horario', 'numero_caixa']],
-            column_config={"nome": "Nome", "horario": "Horário", "numero_caixa": "Caixa"},
+            df_ops_final[['nome', 'nome_impressao', 'horario', 'numero_caixa']],
+            column_config={
+                "nome": st.column_config.TextColumn("Nome Original", disabled=True),
+                "nome_impressao": "Nome na Impressão (Editável)",
+                "horario": "Horário", 
+                "numero_caixa": "Caixa"
+            },
             hide_index=True, use_container_width=True, key=f"editor_ops_{data_selecionada}"
         )
     with c2:
         st.markdown("### 📦 Empacotadores")
         df_emp_edited = st.data_editor(
-            df_emp_final[['nome', 'horario', 'numero_caixa']],
-            column_config={"nome": "Nome", "horario": "Horário", "numero_caixa": "Tarefa/Obs"},
+            df_emp_final[['nome', 'nome_impressao', 'horario', 'numero_caixa']],
+            column_config={
+                "nome": st.column_config.TextColumn("Nome Original", disabled=True),
+                "nome_impressao": "Nome na Impressão (Editável)",
+                "horario": "Horário", 
+                "numero_caixa": "Tarefa/Obs"
+            },
             hide_index=True, use_container_width=True, key=f"editor_emp_{data_selecionada}"
         )
 
