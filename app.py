@@ -95,7 +95,6 @@ def carregar_colaboradores() -> pd.DataFrame:
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
-            # ALTERADO DE nome_curto PARA nome_social
             if 'nome_social' not in df.columns: df['nome_social'] = None
             
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
@@ -128,16 +127,13 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
-                # Merge para pegar funcao e nome_social
                 cols_to_merge = ['nome', 'funcao']
-                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df_colabs.columns:
                     cols_to_merge.append('nome_social')
                 
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
                 df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
-                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df.columns:
                     df['nome_social'] = df['nome_social'].fillna('')
         return df
@@ -234,7 +230,6 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
-# ALTERADO DE nome_curto PARA nome_social
 def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str):
     try:
         supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social}).eq('nome', nome).execute()
@@ -308,7 +303,7 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     </html>
     """
 
-# --- NOVA FUNÇÃO: LAYOUT IDÊNTICO ÀS FOTOS + LÓGICA DE GRUPOS + COR DINÂMICA ---
+# --- NOVA FUNÇÃO: LAYOUT COMPACTO (SEM BURACOS) ---
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_tema):
     
     lista_op_folga = []
@@ -319,17 +314,19 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     c_op_tarde = 0; c_self_tarde = 0
     c_emp_manha = 0; c_emp_tarde = 0
 
+    # --- LISTAS PLANAS PARA OS DADOS (PARA NÃO GERAR BURACOS) ---
+    flat_ops_data = []
+    flat_emp_data = []
+
     # --- PROCESSA OPERADORAS ---
-    ops_agrupado = {} 
-    
     # Ordem: Self -> 17 -> 16... -> Recepção/Delivery
     def sort_key_caixa(row):
         cx = str(row.get('numero_caixa', '')).strip().upper()
         cx = cx.replace('.0', '')
-        if not cx or cx == 'NAN': return -999 # Sem caixa
+        if not cx or cx == 'NAN': return -999 
         if cx == 'SELF': return 1000
         if cx.isdigit(): return int(cx)
-        return -50 # Textos
+        return -50 
     
     df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
     df_ops_sorted = df_ops_dia.sort_values(by='rank_cx', ascending=False)
@@ -337,8 +334,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     for _, row in df_ops_sorted.iterrows():
         horario = str(row['horario'])
         
-        # --- LÓGICA DE NOME PERSONALIZADO (NOVO) ---
-        # Prioriza o nome_impressao (que vem do banco como nome_social ou editado na hora)
+        # Nome Personalizado
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -356,7 +352,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
         
-        # Filtro de Contagem: Recepção, Delivery e MAGAZINE NÃO contam
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE"])
 
@@ -368,17 +363,22 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             elif not is_excluded_count: c_op_tarde += 1
 
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
-        if horario not in ops_agrupado: ops_agrupado[horario] = []
-        ops_agrupado[horario].append({'cx': cx, 'nome': nome, 'h_clean': h_clean})
+        
+        # Adiciona na lista plana (Será ordenada por horário)
+        flat_ops_data.append({
+            'cx': cx, 
+            'nome': nome, 
+            'h_clean': h_clean, 
+            'mins': mins, 
+            'rank': row['rank_cx']
+        })
 
     # --- PROCESSA EMPACOTADORES ---
-    emp_agrupado = {}
     df_emp_sorted = df_emp_dia.sort_values(by='nome')
     
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
         
-        # --- LÓGICA DE NOME PERSONALIZADO (EMP) ---
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -399,57 +399,42 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         if mins >= 570: c_emp_tarde += 1
         
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
-        if horario not in emp_agrupado: emp_agrupado[horario] = []
         
         nome_display = nome
         if tarefa and tarefa != "nan" and tarefa != "":
             nome_display = f"{nome} <span style='font-size:0.85em'>({tarefa})</span>"
             
-        emp_agrupado[horario].append({'nome': nome_display, 'h_clean': h_clean})
+        flat_emp_data.append({
+            'nome': nome_display, 
+            'h_clean': h_clean, 
+            'mins': mins
+        })
 
-    # --- CRIA LISTA DE HORÁRIOS ÚNICOS E ORDENADOS ---
-    todos_horarios = set(list(ops_agrupado.keys()) + list(emp_agrupado.keys()))
-    horarios_ordenados = sorted(list(todos_horarios), key=lambda x: calcular_minutos(x))
+    # --- ORDENAÇÃO FINAL DAS LISTAS (HORÁRIO CRESCENTE) ---
+    # Op: Horario ASC, depois Rank Cx DESC
+    flat_ops_data.sort(key=lambda x: (x['mins'], -x['rank']))
+    # Emp: Horario ASC, depois Nome ASC
+    flat_emp_data.sort(key=lambda x: (x['mins'], x['nome']))
 
-    # --- MONTA AS LINHAS DA TABELA (5 COLUNAS) ---
+    # --- MONTA AS LINHAS DA TABELA (ZIPANDO AS DUAS LISTAS) ---
     rows_html = ""
     
-    for h_str in horarios_ordenados:
-        h_clean = h_str.replace(" HRS", "H")
+    # O segredo do "sem buracos": Usamos zip_longest nas listas planas
+    # Assim, a linha 1 tem o 1º op e o 1º emp, independente do horário.
+    for op, emp in zip_longest(flat_ops_data, flat_emp_data, fillvalue=None):
+        # Coluna Op
+        if op:
+            op_html = f"<td class='cx-col'>{op['cx']}</td><td class='nome-col'>{op['nome']}</td><td class='horario-col'>{op['h_clean']}</td>"
+        else:
+            op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
         
-        ops_list = ops_agrupado.get(h_str, [])
-        emp_list = emp_agrupado.get(h_str, [])
-        
-        zipped = list(zip_longest(ops_list, emp_list, fillvalue=None))
-        
-        if rows_html != "":
-            # AQUI ESTÁ O AJUSTE PARA 6 COLUNAS DE ESPAÇO
-            rows_html += f"""
-            <tr class='spacer-row'>
-                <td class='spacer-content' colspan='3'></td>
-                <td class='spacer-divider'></td>
-                <td class='spacer-content' colspan='2'></td>
-            </tr>
-            """
-
-        for idx, (op, emp) in enumerate(zipped):
-            # Op
-            if op:
-                cx_display = op['cx']
-                op_content = f"{op['nome']}" 
-                op_html = f"<td class='cx-col'>{cx_display}</td><td class='nome-col'>{op_content}</td><td class='horario-col'>{op['h_clean']}</td>"
-            else:
-                op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
+        # Coluna Emp
+        if emp:
+            emp_html = f"<td class='col-emp-nome border-left'>{emp['nome']}</td><td class='horario-col'>{emp['h_clean']}</td>"
+        else:
+            emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
             
-            # Emp
-            if emp:
-                emp_content = f"{emp['nome']}"
-                emp_html = f"<td class='nome-col border-left'>{emp_content}</td><td class='horario-col'>{emp['h_clean']}</td>"
-            else:
-                emp_html = "<td class='nome-col border-left'></td><td class='horario-col'></td>"
-            
-            # ADICIONADA A COLUNA DIVISÓRIA NO MEIO
-            rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
+        rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
 
     str_folga_op = formatar_lista_folgas_multilinha(lista_op_folga, step=2)
     str_folga_emp = formatar_lista_folgas_multilinha(lista_emp_folga, step=2)
@@ -487,7 +472,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 16px; /* AUMENTADO DE 14 PARA 16 */
+                font-size: 16px; 
                 width: 90%; 
                 margin-left: auto; 
                 margin-right: auto;
@@ -495,7 +480,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             }}
             
             .print-frame {{
-                border: 4px solid {cor_tema}; /* MOLDURA EXTERNA */
+                border: 4px solid {cor_tema}; 
                 padding: 15px; 
                 width: 100%;
                 box-sizing: border-box;
@@ -524,7 +509,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 6px; 
                 text-transform: uppercase; 
                 border: 1px solid {cor_tema}; 
-                font-size: 19px; /* AUMENTADO DE 16 PARA 19 */
+                font-size: 19px; 
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
@@ -532,18 +517,18 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             td {{ 
                 padding: 4px; 
                 border: 1px solid {cor_tema}; 
-                height: 28px; /* AUMENTADO DE 24 PARA 28 */
+                height: 28px; 
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
                 text-align: center; 
             }}
             
-            .cx-col {{ width: 8%; font-weight: bold; font-size: 20px; }} /* AUMENTADO DE 16 PARA 20 */
-            .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
-            .horario-col {{ width: 10%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
+            .cx-col {{ width: 8%; font-weight: bold; font-size: 20px; }} 
+            .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 18px; }} 
+            .horario-col {{ width: 10%; font-weight: bold; font-size: 18px; }} 
             
-            .divider-col, .spacer-divider {{
+            .divider-col {{
                 width: 1%;
                 background-color: {cor_tema} !important;
                 padding: 0;
@@ -551,7 +536,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 -webkit-print-color-adjust: exact;
             }}
 
-            .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
+            .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 18px; }} 
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
             
@@ -559,12 +544,10 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
             
-            .spacer-content {{ background-color: #999 !important; height: 3px; padding:0; -webkit-print-color-adjust: exact; }}
-
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
             .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 14px; padding: 4px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 14px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }} /* AUMENTADO PARA 14 */
+            .footer-content {{ background: #eee !important; font-size: 14px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
             
             .totals-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; background: {cor_tema} !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
             .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
@@ -573,7 +556,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 body {{ padding: 0; margin: 0 auto; width: 90%; zoom: 90%; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
-                .spacer-content {{ background-color: #999 !important; }}
             }}
         </style>
     </head>
