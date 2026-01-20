@@ -918,7 +918,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
-                            if is_op or is_emp:
+                            # Logica para recepção e operadora usarem a mesma lista de caixas
+                            is_recep = (funcao_selecionada == "Recepção")
+                            
+                            if is_op or is_emp or is_recep:
                                 c_val = info.get('caixa', "")
                                 worksheet.write(row_excel, current_c, c_val, fmt_grid)
                                 current_c += 1
@@ -940,9 +943,11 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
 
                         col_idx += 1
                         
-                        if is_op or is_emp:
-                            header_title = "CX" if is_op else "TAREFAS"
-                            valid_list = '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA)) if is_op else '=Dados!$C$1:$C$' + str(len(LISTA_TAREFAS_EMPACOTADOR))
+                        is_recep = (funcao_selecionada == "Recepção")
+                        
+                        if is_op or is_emp or is_recep:
+                            header_title = "CX" if (is_op or is_recep) else "TAREFAS"
+                            valid_list = '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA)) if (is_op or is_recep) else '=Dados!$C$1:$C$' + str(len(LISTA_TAREFAS_EMPACOTADOR))
                             
                             worksheet.write(0, col_idx, header_title, fmt_cx_header)
                             worksheet.set_column(col_idx, col_idx, 10, None)
@@ -956,7 +961,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     worksheet.write(row_total_m, 0, f"{nome_cargo} Manhã", fmt_manha)
                     worksheet.write(row_total_t, 0, f"{nome_cargo} Tarde", fmt_tarde)
                     
-                    step = 2 if (is_op or is_emp) else 1
+                    step = 2 if (is_op or is_emp or is_recep) else 1
                     
                     def num_to_col(n):
                         s = ""
