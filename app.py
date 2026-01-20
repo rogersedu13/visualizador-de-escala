@@ -95,6 +95,7 @@ def carregar_colaboradores() -> pd.DataFrame:
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
+            # ALTERADO DE nome_curto PARA nome_social
             if 'nome_social' not in df.columns: df['nome_social'] = None
             
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
@@ -127,13 +128,16 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
+                # Merge para pegar funcao e nome_social
                 cols_to_merge = ['nome', 'funcao']
+                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df_colabs.columns:
                     cols_to_merge.append('nome_social')
                 
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
                 df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
+                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df.columns:
                     df['nome_social'] = df['nome_social'].fillna('')
         return df
@@ -230,6 +234,7 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
+# ALTERADO DE nome_curto PARA nome_social
 def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str):
     try:
         supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social}).eq('nome', nome).execute()
@@ -427,9 +432,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     for emp in flat_emp_data:
         final_emp_list.append(emp)
         if emp.get('has_separator'):
-            # Adiciona 2 espaços vazios (None) após o separador
+            # Adiciona APENAS 1 espaço vazio (None) após o separador
             final_emp_list.append(None) 
-            final_emp_list.append(None)
             
     # --- MONTA AS LINHAS ---
     rows_html = ""
