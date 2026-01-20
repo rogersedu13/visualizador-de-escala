@@ -95,6 +95,7 @@ def carregar_colaboradores() -> pd.DataFrame:
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
+            # ALTERADO DE nome_curto PARA nome_social
             if 'nome_social' not in df.columns: df['nome_social'] = None
             
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
@@ -127,13 +128,16 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
+                # Merge para pegar funcao e nome_social
                 cols_to_merge = ['nome', 'funcao']
+                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df_colabs.columns:
                     cols_to_merge.append('nome_social')
                 
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
                 df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
+                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df.columns:
                     df['nome_social'] = df['nome_social'].fillna('')
         return df
@@ -230,6 +234,7 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
+# ALTERADO DE nome_curto PARA nome_social
 def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str):
     try:
         supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social}).eq('nome', nome).execute()
@@ -370,7 +375,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             'nome': nome, 
             'h_clean': h_clean, 
             'mins': mins, 
-            'rank': row['rank_cx']
+            'rank': row['rank_cx'],
+            'has_separator': False
         })
 
     # --- PROCESSA EMPACOTADORES ---
@@ -407,7 +413,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         flat_emp_data.append({
             'nome': nome_display, 
             'h_clean': h_clean, 
-            'mins': mins
+            'mins': mins,
+            'has_separator': False
         })
 
     # --- ORDENAÇÃO FINAL DAS LISTAS (HORÁRIO CRESCENTE) ---
@@ -416,21 +423,39 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     # Emp: Horario ASC, depois Nome ASC
     flat_emp_data.sort(key=lambda x: (x['mins'], x['nome']))
 
+    # --- LÓGICA DE SEPARADOR (LINHA PRETA) QUANDO O HORÁRIO MUDAR ---
+    # Detecta mudança de horário na lista de OPS
+    for i in range(len(flat_ops_data) - 1):
+        if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']:
+            flat_ops_data[i]['has_separator'] = True
+    
+    # Detecta mudança de horário na lista de EMPS
+    for i in range(len(flat_emp_data) - 1):
+        if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']:
+            flat_emp_data[i]['has_separator'] = True
+
     # --- MONTA AS LINHAS DA TABELA (ZIPANDO AS DUAS LISTAS) ---
     rows_html = ""
     
     # O segredo do "sem buracos": Usamos zip_longest nas listas planas
     # Assim, a linha 1 tem o 1º op e o 1º emp, independente do horário.
     for op, emp in zip_longest(flat_ops_data, flat_emp_data, fillvalue=None):
+        
         # Coluna Op
+        op_html = ""
+        op_class_extra = " separator-bottom" if (op and op['has_separator']) else ""
+        
         if op:
-            op_html = f"<td class='cx-col'>{op['cx']}</td><td class='nome-col'>{op['nome']}</td><td class='horario-col'>{op['h_clean']}</td>"
+            op_html = f"<td class='cx-col{op_class_extra}'>{op['cx']}</td><td class='nome-col{op_class_extra}'>{op['nome']}</td><td class='horario-col{op_class_extra}'>{op['h_clean']}</td>"
         else:
             op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
         
         # Coluna Emp
+        emp_html = ""
+        emp_class_extra = " separator-bottom" if (emp and emp['has_separator']) else ""
+
         if emp:
-            emp_html = f"<td class='col-emp-nome border-left'>{emp['nome']}</td><td class='horario-col'>{emp['h_clean']}</td>"
+            emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
         else:
             emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
             
@@ -524,6 +549,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 text-align: center; 
             }}
             
+            /* CLASSE PARA A LINHA PRETA GROSSA NO FINAL DO HORÁRIO */
+            .separator-bottom {{
+                border-bottom: 4px solid #000 !important;
+            }}
+            
             .cx-col {{ width: 8%; font-weight: bold; font-size: 20px; }} 
             .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 18px; }} 
             .horario-col {{ width: 10%; font-weight: bold; font-size: 18px; }} 
@@ -556,6 +586,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 body {{ padding: 0; margin: 0 auto; width: 90%; zoom: 90%; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
                 tr:nth-child(even), .footer-content {{ background-color: #ccc !important; }}
+                /* Força a borda preta na impressão */
+                .separator-bottom {{ border-bottom: 4px solid #000 !important; }}
             }}
         </style>
     </head>
