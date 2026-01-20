@@ -487,7 +487,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 margin: 0; 
                 padding: 10px; 
                 background: white; 
-                font-size: 14px; 
+                font-size: 16px; /* AUMENTADO DE 14 PARA 16 */
                 width: 90%; 
                 margin-left: auto; 
                 margin-right: auto;
@@ -524,7 +524,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 padding: 6px; 
                 text-transform: uppercase; 
                 border: 1px solid {cor_tema}; 
-                font-size: 16px; 
+                font-size: 19px; /* AUMENTADO DE 16 PARA 19 */
                 text-align: center;
                 -webkit-print-color-adjust: exact; 
             }}
@@ -532,16 +532,16 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             td {{ 
                 padding: 4px; 
                 border: 1px solid {cor_tema}; 
-                height: 24px; 
+                height: 28px; /* AUMENTADO DE 24 PARA 28 */
                 vertical-align: middle;
                 white-space: nowrap; 
                 overflow: hidden;
                 text-align: center; 
             }}
             
-            .cx-col {{ width: 8%; font-weight: bold; font-size: 16px; }}
-            .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 15px; }}
-            .horario-col {{ width: 10%; font-weight: bold; font-size: 15px; }}
+            .cx-col {{ width: 8%; font-weight: bold; font-size: 20px; }} /* AUMENTADO DE 16 PARA 20 */
+            .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
+            .horario-col {{ width: 10%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
             
             .divider-col, .spacer-divider {{
                 width: 1%;
@@ -551,7 +551,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 -webkit-print-color-adjust: exact;
             }}
 
-            .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 15px; }}
+            .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 18px; }} /* AUMENTADO DE 15 PARA 18 */
             
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
             
@@ -564,7 +564,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
             .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 14px; padding: 4px; -webkit-print-color-adjust: exact; }}
-            .footer-content {{ background: #eee !important; font-size: 12px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
+            .footer-content {{ background: #eee !important; font-size: 14px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }} /* AUMENTADO PARA 14 */
             
             .totals-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; background: {cor_tema} !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
             .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
@@ -632,6 +632,7 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     
     if df_colaboradores.empty: st.warning("Nenhum colaborador cadastrado."); return
 
+    # --- 1. VISUALIZADOR DE ESCALA (EM CIMA) ---
     nomes_disponiveis = [""] + sorted(df_colaboradores["nome"].dropna().unique())
     nome_selecionado = st.selectbox("1. Selecione seu nome para ver a escala:", options=nomes_disponiveis)
 
