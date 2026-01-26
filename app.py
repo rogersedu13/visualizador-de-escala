@@ -54,7 +54,7 @@ def calcular_minutos(horario_str):
     except:
         return 9999
 
-# Regras de Negócio para Totais do Excel
+# Regras de Negócio para Totais do Excel (Padrao Geral)
 HORARIOS_MANHA = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) > 0 and calcular_minutos(h) <= 600]
 HORARIOS_TARDE = [h for h in HORARIOS_PADRAO if "HRS" in h and calcular_minutos(h) >= 570]
 
@@ -358,12 +358,23 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE"])
 
-        if mins <= 630: 
+        # === LÓGICA DE CONTAGEM (COM DOBRA DE 7:30) ===
+        if mins == 450: # 7:30 HRS = 450 min
+            # Conta como Manhã
             if is_self: c_self_manha += 1
             elif not is_excluded_count: c_op_manha += 1
-        if mins >= 570: 
+            
+            # Conta TAMBÉM como Tarde (Dobra)
             if is_self: c_self_tarde += 1
             elif not is_excluded_count: c_op_tarde += 1
+        else:
+            # Lógica Normal
+            if mins <= 630: 
+                if is_self: c_self_manha += 1
+                elif not is_excluded_count: c_op_manha += 1
+            if mins >= 570: 
+                if is_self: c_self_tarde += 1
+                elif not is_excluded_count: c_op_tarde += 1
 
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
         
@@ -995,8 +1006,12 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             rng_cx = f"{letra_cx}2:{letra_cx}{last_data_row+1}"
                             
                             # Adicionado MAGAZINE na exclusão
+                            # 7:30 JÁ ESTÁ INCLUÍDO EM HORARIOS_MANHA POR PADRÃO
                             crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_MANHA])
-                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_TARDE])
+                            
+                            # PARA TARDE, ADICIONAMOS 7:30 MANUALMENTE NA LISTA
+                            lista_h_tarde_op = HORARIOS_TARDE + ["7:30 HRS"]
+                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in lista_h_tarde_op])
                             
                             # --- NOVO BLOQUEIO DE DUPLICIDADE (VERMELHO) ---
                             # FORMULA INTELIGENTE COM TRAVAMENTO DE INTERVALO ($)
