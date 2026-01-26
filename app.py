@@ -1208,7 +1208,8 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
     if df_dia.empty: df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
 
-    df_ops_base = df_colaboradores[df_colaboradores['funcao'] == 'Operador(a) de Caixa']
+    # ADDED RECEPÇÃO TO OPS BASE
+    df_ops_base = df_colaboradores[df_colaboradores['funcao'].isin(['Operador(a) de Caixa', 'Recepção'])]
     df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
 
     df_ops_final = df_ops_base.merge(df_dia[['nome', 'horario', 'numero_caixa']], on='nome', how='left').fillna("")
