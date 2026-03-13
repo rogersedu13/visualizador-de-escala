@@ -306,7 +306,7 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
             h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
             table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }}
             table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
-            /* white-space: nowrap GARANTE QUE A PALAVRA (Ex: Magazine) NÃO SEJA CORTADA NA IMPRESSÃO */
+            /* white-space: nowrap GARANTE QUE A PALAVRA NÃO SEJA CORTADA NA IMPRESSÃO */
             table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; white-space: nowrap; }}
             table.tabela-escala tr:last-child td {{ border-bottom: none; }}
             table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
@@ -660,49 +660,140 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     """
 
 # --- FUNÇÕES DE CONTROLE DE HORAS ---
+
+def obter_intervalo_minutos(h, m):
+    mins = h * 60 + m
+    if mins >= 870: # 14:30 em diante
+        return 15
+    elif mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
+        return 90
+    else:
+        return 60
+
 def calcular_saida_prevista(entrada_str):
-    if not entrada_str or "HRS" not in str(entrada_str): return ""
+    if not entrada_str or "HRS" not in str(entrada_str): return "", ""
     try:
         time_part = str(entrada_str).replace(" HRS", "").strip()
         h, m = map(int, time_part.split(':'))
         
+        intervalo_mins = obter_intervalo_minutos(h, m)
+        
+        # Regra: 7h20 de trabalho (440 minutos) + tempo de intervalo
         td_entrada = timedelta(hours=h, minutes=m)
-        td_saida = td_entrada + timedelta(hours=8, minutes=20)
+        td_saida = td_entrada + timedelta(minutes=(440 + intervalo_mins))
         
         total_minutes = int(td_saida.total_seconds() // 60)
         out_h = (total_minutes // 60) % 24
         out_m = total_minutes % 60
         
-        return f"{out_h:02d}:{out_m:02d}"
-    except:
-        return ""
-
-def calcular_diferenca(prevista_str, real_str):
-    if not prevista_str or not real_str: return 0
-    try:
-        ph, pm = map(int, prevista_str.split(':'))
-        rh, rm = map(int, str(real_str).replace("h", ":").replace("H", ":").split(':'))
+        # Cria a string bonitinha do intervalo
+        if intervalo_mins == 15: str_int = "15 min"
+        elif intervalo_mins == 90: str_int = "1h 30m"
+        else: str_int = "1 hora"
         
-        mins_prev = ph * 60 + pm
-        mins_real = rh * 60 + rm
-        
-        if mins_real < mins_prev and mins_prev > 1200: 
-            mins_real += 24 * 60
-            
-        return mins_real - mins_prev
+        return str_int, f"{out_h:02d}:{out_m:02d}"
     except:
-        return 0
-
-def formatar_minutos(total_mins):
-    if total_mins == 0: return "00:00"
-    sign = "+" if total_mins > 0 else "-"
-    total_mins = abs(total_mins)
-    h = total_mins // 60
-    m = total_mins % 60
-    return f"{sign}{h:02d}:{m:02d}"
-
+        return "", ""
 
 # --- ABAS ---
+
+@st.fragment
+def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
+    st.header("⏱️ Controle de Horas e Calculadora")
+    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para apurar horas extras ou atrasos na hora de passar pro sistema.")
+    
+    if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
+    if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
+
+    # Filtro: Todos MENOS Empacotadores
+    df_horas = df_colaboradores[df_colaboradores['funcao'] != 'Empacotador(a)']
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        semana_str = st.selectbox("1. Selecione a semana:", options=opcoes.keys(), key="sel_sem_horas")
+        semana_info = opcoes[semana_str]
+    with c2:
+        nomes = [""] + sorted(df_horas['nome'].unique())
+        colaborador = st.selectbox("2. Selecione o Colaborador:", nomes, key="sel_colab_horas")
+
+    st.markdown("---")
+    
+    if semana_info and colaborador:
+        id_semana = semana_info['id']
+        df_full = carregar_escala_semana_por_id(id_semana)
+        escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
+        
+        if escala_colab.empty:
+            st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
+        else:
+            dados_tabela = []
+            for _, row in escala_colab.iterrows():
+                data_dt = pd.to_datetime(row['data'])
+                dia_str = data_dt.strftime(f'%d/%m ({DIAS_SEMANA_PT[data_dt.weekday()][:3]})')
+                entrada = row['horario']
+                
+                intervalo, prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ("", "")
+                
+                dados_tabela.append({
+                    "Data": dia_str,
+                    "Entrada Escala": entrada,
+                    "Tempo Almoço/Café": intervalo,
+                    "Saída Prevista (Cravada)": prevista
+                })
+                
+            df_display = pd.DataFrame(dados_tabela)
+            
+            st.markdown(f"#### 📅 Escala Prevista da Semana: `{colaborador}`")
+            st.dataframe(df_display, hide_index=True, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
+    
+    col_calc1, col_calc2, col_calc3, col_calc4 = st.columns(4)
+    with col_calc1:
+        calc_entrada = st.time_input("Horário de Entrada (Real)", datetime.time(6, 50))
+    with col_calc2:
+        calc_saida = st.time_input("Horário de Saída (Real)", datetime.time(15, 10))
+    with col_calc3:
+        calc_intervalo = st.selectbox("Tempo de Intervalo Tirado", ["1 hora", "1 hora e 30 min", "15 min", "Sem intervalo"])
+    
+    # Fazendo o cálculo da calculadora avulsa
+    mins_entrada = calc_entrada.hour * 60 + calc_entrada.minute
+    mins_saida = calc_saida.hour * 60 + calc_saida.minute
+    
+    if mins_saida < mins_entrada: # Passou da meia noite
+        mins_saida += 24 * 60
+        
+    mapa_intervalos = {"1 hora": 60, "1 hora e 30 min": 90, "15 min": 15, "Sem intervalo": 0}
+    desc_intervalo = mapa_intervalos[calc_intervalo]
+    
+    trabalhado_liquido = (mins_saida - mins_entrada) - desc_intervalo
+    if trabalhado_liquido < 0: trabalhado_liquido = 0
+    
+    diferenca = trabalhado_liquido - 440 # 440 min = 7h20
+    
+    with col_calc4:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.info("Cálculo automático ⬇️")
+
+    res1, res2 = st.columns(2)
+    trab_h = trabalhado_liquido // 60
+    trab_m = trabalhado_liquido % 60
+    res1.metric("Total Trabalhado (Líquido)", f"{trab_h:02d}h {trab_m:02d}m")
+    
+    if diferenca > 0:
+        diff_h = diferenca // 60
+        diff_m = diferenca % 60
+        res2.metric("Saldo do Dia", f"+ {diff_h:02d}h {diff_m:02d}m", "Hora Extra (Lançar Positivo)")
+    elif diferenca < 0:
+        diff_abs = abs(diferenca)
+        diff_h = diff_abs // 60
+        diff_m = diff_abs % 60
+        res2.metric("Saldo do Dia", f"- {diff_h:02d}h {diff_m:02d}m", "Atraso / Faltou Tempo", delta_color="inverse")
+    else:
+        res2.metric("Saldo do Dia", "00h 00m", "Cravado (Sem extra/atraso)")
+
 
 @st.fragment
 def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -884,106 +975,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
 
 @st.fragment
-def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
-    st.header("⏱️ Controle de Horas Extras e Atrasos")
-    st.info("O sistema calcula a Saída Prevista (Entrada + 8h20m). Digite a Saída Real para calcular o saldo de horas.")
-    
-    if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
-    if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
-
-    # Filtro: Todos MENOS Empacotadores
-    df_horas = df_colaboradores[df_colaboradores['funcao'] != 'Empacotador(a)']
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
-        semana_str = st.selectbox("Selecione a semana:", options=opcoes.keys(), key="sel_sem_horas")
-        semana_info = opcoes[semana_str]
-    with c2:
-        nomes = [""] + sorted(df_horas['nome'].unique())
-        colaborador = st.selectbox("Selecione o Colaborador:", nomes, key="sel_colab_horas")
-
-    st.markdown("---")
-    
-    if semana_info and colaborador:
-        id_semana = semana_info['id']
-        df_full = carregar_escala_semana_por_id(id_semana)
-        escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
-        
-        if escala_colab.empty:
-            st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
-            return
-            
-        dados_tabela = []
-        for _, row in escala_colab.iterrows():
-            data_dt = pd.to_datetime(row['data'])
-            dia_str = data_dt.strftime(f'%d/%m ({DIAS_SEMANA_PT[data_dt.weekday()][:3]})')
-            entrada = row['horario']
-            
-            prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ""
-            
-            dados_tabela.append({
-                "Data": dia_str,
-                "Entrada": entrada,
-                "Saída Prevista": prevista,
-                "Saída Real": "", 
-                "Feriado": False
-            })
-            
-        df_display = pd.DataFrame(dados_tabela)
-        
-        edited_df = st.data_editor(
-            df_display,
-            column_config={
-                "Data": st.column_config.TextColumn("Data", disabled=True),
-                "Entrada": st.column_config.TextColumn("Entrada Programada", disabled=True),
-                "Saída Prevista": st.column_config.TextColumn("Saída Prevista", disabled=True),
-                "Saída Real": st.column_config.TextColumn("Saída Real (ex: 15:30)"),
-                "Feriado": st.column_config.CheckboxColumn("É Feriado?", default=False)
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-        # --- CÁLCULO ---
-        total_extra_mins = 0
-        total_atraso_mins = 0
-        total_feriado_mins = 0
-        
-        st.markdown("### 📊 Resumo da Semana")
-        
-        for index, row in edited_df.iterrows():
-            if row['Saída Prevista'] and row['Saída Real']:
-                diff_mins = calcular_diferenca(row['Saída Prevista'], row['Saída Real'])
-                
-                if row['Feriado']:
-                    h_ent, m_ent = map(int, str(row['Entrada']).replace(" HRS", "").strip().split(':'))
-                    h_real, m_real = map(int, str(row['Saída Real']).replace("h", ":").replace("H", ":").split(':'))
-                    
-                    mins_ent = h_ent * 60 + m_ent
-                    mins_real = h_real * 60 + m_real
-                    
-                    if mins_real < mins_ent and mins_ent > 1200: mins_real += 24 * 60
-                    
-                    trabalhado_mins = (mins_real - mins_ent) - 60 
-                    if trabalhado_mins > 0:
-                        total_feriado_mins += trabalhado_mins
-                else:
-                    if diff_mins > 0:
-                        total_extra_mins += diff_mins
-                    elif diff_mins < 0:
-                        total_atraso_mins += abs(diff_mins)
-        
-        c_res1, c_res2, c_res3, c_res4 = st.columns(4)
-        c_res1.metric("🟢 Horas Extras", formatar_minutos(total_extra_mins))
-        c_res2.metric("🔴 Atrasos / Saídas", formatar_minutos(-total_atraso_mins))
-        c_res3.metric("🔵 Feriado (Pagar na Folha)", formatar_minutos(total_feriado_mins))
-        
-        saldo_geral = total_extra_mins - total_atraso_mins
-        cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
-        c_res4.metric(f"{cor_saldo} Saldo de Banco", formatar_minutos(saldo_geral), help="Feriado não entra neste cálculo de banco.")
-
-@st.fragment
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.subheader("📤 Importar / Baixar Escala (Excel)")
     st.info("Utilize esta aba para baixar a escala pronta (como backup/impressão) ou para baixar o modelo e preencher offline.")
@@ -1152,6 +1143,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
+                        # LOGICA CONDICIONAL DE CONTAGEM PARA EXCEL 
                         if is_op:
                             letra_cx = num_to_col(current_col + 1)
                             rng_cx = f"{letra_cx}2:{letra_cx}{last_data_row+1}"
