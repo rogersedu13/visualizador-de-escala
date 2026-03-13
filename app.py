@@ -663,10 +663,12 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
 def obter_intervalo_minutos(h, m):
     mins = h * 60 + m
-    if mins >= 870: # 14:30 em diante
+    if mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
+        return 105 # 1h30 almoço + 15m café
+    elif mins == 660 or mins == 720: # 11:00 (660) ou 12:00 (720)
+        return 75 # 1h almoço + 15m café
+    elif mins >= 870: # 14:30 em diante
         return 15
-    elif mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
-        return 90
     else:
         return 60
 
@@ -687,8 +689,10 @@ def calcular_saida_prevista(entrada_str):
         out_m = total_minutes % 60
         
         # Cria a string bonitinha do intervalo
-        if intervalo_mins == 15: str_int = "15 min"
+        if intervalo_mins == 15: str_int = "15 min (Só Café)"
+        elif intervalo_mins == 75: str_int = "1h 15m (Almoço+Café)"
         elif intervalo_mins == 90: str_int = "1h 30m"
+        elif intervalo_mins == 105: str_int = "1h 45m (Almoço+Café)"
         else: str_int = "1 hora"
         
         return str_int, f"{out_h:02d}:{out_m:02d}"
@@ -700,7 +704,7 @@ def calcular_saida_prevista(entrada_str):
 @st.fragment
 def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("⏱️ Controle de Horas e Calculadora")
-    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para apurar horas extras ou atrasos na hora de passar pro sistema.")
+    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para horas extras ou atrasos na hora de passar pro sistema.")
     
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
@@ -737,9 +741,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 
                 dados_tabela.append({
                     "Data": dia_str,
-                    "Entrada Escala": entrada,
+                    "Entrada": entrada,
                     "Tempo Almoço/Café": intervalo,
-                    "Saída Prevista (Cravada)": prevista
+                    "Saída": prevista
                 })
                 
             df_display = pd.DataFrame(dados_tabela)
@@ -748,15 +752,20 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             st.dataframe(df_display, hide_index=True, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
+    st.markdown("### 🧮 Calculadora Avulsa de Horas")
     
-    col_calc1, col_calc2, col_calc3, col_calc4 = st.columns(4)
+    col_calc1, col_calc2, col_calc3, col_calc4, col_calc5 = st.columns(5)
     with col_calc1:
-        calc_entrada = st.time_input("Horário de Entrada (Real)", datetime.time(6, 50))
+        calc_entrada = st.time_input("Entrada", datetime.time(6, 50))
     with col_calc2:
-        calc_saida = st.time_input("Horário de Saída (Real)", datetime.time(15, 10))
+        calc_saida = st.time_input("Saída", datetime.time(15, 10))
     with col_calc3:
-        calc_intervalo = st.selectbox("Tempo de Intervalo Tirado", ["1 hora", "1 hora e 30 min", "15 min", "Sem intervalo"])
+        calc_almoco = st.selectbox("Tempo Almoço", ["1 hora", "1 hora e 30 min", "2 horas", "Sem almoço"])
+    with col_calc4:
+        calc_cafe = st.selectbox("Tempo Café", ["Sem café", "10 min", "15 min", "30 min"])
+    with col_calc5:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.info("Cálculo Automático ⬇️")
     
     # Fazendo o cálculo da calculadora avulsa
     mins_entrada = calc_entrada.hour * 60 + calc_entrada.minute
@@ -765,34 +774,44 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
     if mins_saida < mins_entrada: # Passou da meia noite
         mins_saida += 24 * 60
         
-    mapa_intervalos = {"1 hora": 60, "1 hora e 30 min": 90, "15 min": 15, "Sem intervalo": 0}
-    desc_intervalo = mapa_intervalos[calc_intervalo]
+    mapa_almoco = {
+        "Sem almoço": 0,
+        "1 hora": 60,
+        "1 hora e 30 min": 90,
+        "2 horas": 120
+    }
     
-    trabalhado_liquido = (mins_saida - mins_entrada) - desc_intervalo
+    mapa_cafe = {
+        "Sem café": 0,
+        "10 min": 10,
+        "15 min": 15,
+        "30 min": 30
+    }
+    
+    desc_almoco = mapa_almoco[calc_almoco]
+    desc_cafe = mapa_cafe[calc_cafe]
+    
+    trabalhado_liquido = (mins_saida - mins_entrada) - desc_almoco - desc_cafe
     if trabalhado_liquido < 0: trabalhado_liquido = 0
     
     diferenca = trabalhado_liquido - 440 # 440 min = 7h20
     
-    with col_calc4:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.info("Cálculo automático ⬇️")
-
     res1, res2 = st.columns(2)
     trab_h = trabalhado_liquido // 60
     trab_m = trabalhado_liquido % 60
-    res1.metric("Total Trabalhado (Líquido)", f"{trab_h:02d}h {trab_m:02d}m")
+    res1.metric("Total Trabalhado", f"{trab_h:02d}h {trab_m:02d}m")
     
     if diferenca > 0:
         diff_h = diferenca // 60
         diff_m = diferenca % 60
-        res2.metric("Saldo do Dia", f"+ {diff_h:02d}h {diff_m:02d}m", "Hora Extra (Lançar Positivo)")
+        res2.metric("Saldo do Dia", f"+ {diff_h:02d}h {diff_m:02d}m", "Hora Extra")
     elif diferenca < 0:
         diff_abs = abs(diferenca)
         diff_h = diff_abs // 60
         diff_m = diff_abs % 60
         res2.metric("Saldo do Dia", f"- {diff_h:02d}h {diff_m:02d}m", "Atraso / Faltou Tempo", delta_color="inverse")
     else:
-        res2.metric("Saldo do Dia", "00h 00m", "Cravado (Sem extra/atraso)")
+        res2.metric("Saldo do Dia", "00h 00m", "(Sem hora extra")
 
 
 @st.fragment
