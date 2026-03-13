@@ -31,7 +31,7 @@ H_CINZA    = ["Folga"]
 H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 
 # --- LISTAS ESPECÍFICAS POR FUNÇÃO ---
-LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine"] + [str(i) for i in range(1, 18)]
+LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine", "Salinha"] + [str(i) for i in range(1, 18)]
 
 # Para Empacotadores (Tarefas)
 LISTA_TAREFAS_EMPACOTADOR = [
@@ -41,7 +41,8 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Devolução", 
     "Carrinho", 
     "Varrer Baias", 
-    "Recolher Cestas"
+    "Recolher Cestas",
+    "Lavar carrinhos"
 ]
 
 # --- LÓGICA DE CORTE MANHÃ / TARDE ---
@@ -94,12 +95,14 @@ def carregar_colaboradores() -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
+            
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
-            # ALTERADO DE nome_curto PARA nome_social
             if 'nome_social' not in df.columns: df['nome_social'] = None
+            if 'folga_fixa' not in df.columns: df['folga_fixa'] = None
             
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
             df['nome_social'] = df['nome_social'].fillna('')
+            df['folga_fixa'] = df['folga_fixa'].fillna('')
         return df
     except Exception as e: 
         return pd.DataFrame()
@@ -128,16 +131,13 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
-                # Merge para pegar funcao e nome_social
                 cols_to_merge = ['nome', 'funcao']
-                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df_colabs.columns:
                     cols_to_merge.append('nome_social')
                 
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
                 df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
-                # ALTERADO DE nome_curto PARA nome_social
                 if 'nome_social' in df.columns:
                     df['nome_social'] = df['nome_social'].fillna('')
         return df
@@ -208,11 +208,26 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
         if not res.data: return False
         new_id = res.data[0]['id']
         df_colabs = carregar_colaboradores()
+        
         if not df_colabs.empty:
-            for nome in df_colabs['nome']:
+            for index, row in df_colabs.iterrows():
+                nome = row['nome']
+                folga_fixa = row.get('folga_fixa', '')
+                
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
-                    supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': '', 'p_caixa': None, 'p_semana_id': new_id}).execute()
+                    dia_semana_nome = DIAS_SEMANA_PT[d.weekday()]
+                    
+                    # Automagicamente preenche a folga se for o dia da folga fixa
+                    horario_padrao = "Folga" if folga_fixa == dia_semana_nome else ""
+                    
+                    supabase.rpc('save_escala_dia_final', {
+                        'p_nome': nome, 
+                        'p_data': d.strftime('%Y-%m-%d'), 
+                        'p_horario': horario_padrao, 
+                        'p_caixa': None, 
+                        'p_semana_id': new_id
+                    }).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -234,10 +249,9 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
-# ALTERADO DE nome_curto PARA nome_social
-def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str):
+def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str, nova_folga: str):
     try:
-        supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social}).eq('nome', nome).execute()
+        supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social, 'folga_fixa': nova_folga}).eq('nome', nome).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -290,9 +304,10 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
             .container {{ background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 700px; text-align: center; }}
             h1 {{ color: #2c3e50; font-size: 24px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }}
             h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
-            table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+            table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }}
             table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
-            table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; }}
+            /* white-space: nowrap GARANTE QUE A PALAVRA (Ex: Magazine) NÃO SEJA CORTADA NA IMPRESSÃO */
+            table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; white-space: nowrap; }}
             table.tabela-escala tr:last-child td {{ border-bottom: none; }}
             table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
             @media print {{ body {{ background-color: white; }} .container {{ box-shadow: none; border: 1px solid #ddd; max-width: 100%; width: 100%; }} }}
@@ -356,19 +371,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         is_self = (cx == "Self")
         
         cx_upper = cx.upper()
-        is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE"])
+        is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE", "SALINHA"])
 
         # === LÓGICA DE CONTAGEM (COM DOBRA DE 7:30) ===
         if mins == 450: # 7:30 HRS = 450 min
-            # Conta como Manhã
             if is_self: c_self_manha += 1
             elif not is_excluded_count: c_op_manha += 1
-            
-            # Conta TAMBÉM como Tarde (Dobra)
             if is_self: c_self_tarde += 1
             elif not is_excluded_count: c_op_tarde += 1
         else:
-            # Lógica Normal
             if mins <= 630: 
                 if is_self: c_self_manha += 1
                 elif not is_excluded_count: c_op_manha += 1
@@ -443,7 +454,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     for emp in flat_emp_data:
         final_emp_list.append(emp)
         if emp.get('has_separator'):
-            # Adiciona APENAS 1 espaço vazio (None) após o separador
             final_emp_list.append(None) 
             
     # --- MONTA AS LINHAS ---
@@ -649,6 +659,49 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     </html>
     """
 
+# --- FUNÇÕES DE CONTROLE DE HORAS ---
+def calcular_saida_prevista(entrada_str):
+    if not entrada_str or "HRS" not in str(entrada_str): return ""
+    try:
+        time_part = str(entrada_str).replace(" HRS", "").strip()
+        h, m = map(int, time_part.split(':'))
+        
+        td_entrada = timedelta(hours=h, minutes=m)
+        td_saida = td_entrada + timedelta(hours=8, minutes=20)
+        
+        total_minutes = int(td_saida.total_seconds() // 60)
+        out_h = (total_minutes // 60) % 24
+        out_m = total_minutes % 60
+        
+        return f"{out_h:02d}:{out_m:02d}"
+    except:
+        return ""
+
+def calcular_diferenca(prevista_str, real_str):
+    if not prevista_str or not real_str: return 0
+    try:
+        ph, pm = map(int, prevista_str.split(':'))
+        rh, rm = map(int, str(real_str).replace("h", ":").replace("H", ":").split(':'))
+        
+        mins_prev = ph * 60 + pm
+        mins_real = rh * 60 + rm
+        
+        if mins_real < mins_prev and mins_prev > 1200: 
+            mins_real += 24 * 60
+            
+        return mins_real - mins_prev
+    except:
+        return 0
+
+def formatar_minutos(total_mins):
+    if total_mins == 0: return "00:00"
+    sign = "+" if total_mins > 0 else "-"
+    total_mins = abs(total_mins)
+    h = total_mins // 60
+    m = total_mins % 60
+    return f"{sign}{h:02d}:{m:02d}"
+
+
 # --- ABAS ---
 
 @st.fragment
@@ -726,7 +779,7 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
         if st.button("✨ Inicializar Semana", type="primary", use_container_width=True):
             data_inicio = data_sel - timedelta(days=data_sel.weekday())
             if inicializar_semana_simples(data_inicio):
-                st.cache_data.clear(); st.success("Semana inicializada!"); time.sleep(1.5); st.rerun()
+                st.cache_data.clear(); st.success("Semana inicializada com as Folgas Fixas!"); time.sleep(1.5); st.rerun()
     st.markdown("---"); st.markdown("##### 📂 Histórico")
     if not df_semanas_todas.empty:
         for index, row in df_semanas_todas.iterrows():
@@ -829,6 +882,106 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.cache_data.clear() 
                 st.success(f"Salvo!"); time.sleep(1); st.rerun()
+
+@st.fragment
+def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
+    st.header("⏱️ Controle de Horas Extras e Atrasos")
+    st.info("O sistema calcula a Saída Prevista (Entrada + 8h20m). Digite a Saída Real para calcular o saldo de horas.")
+    
+    if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
+    if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
+
+    # Filtro: Todos MENOS Empacotadores
+    df_horas = df_colaboradores[df_colaboradores['funcao'] != 'Empacotador(a)']
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        semana_str = st.selectbox("Selecione a semana:", options=opcoes.keys(), key="sel_sem_horas")
+        semana_info = opcoes[semana_str]
+    with c2:
+        nomes = [""] + sorted(df_horas['nome'].unique())
+        colaborador = st.selectbox("Selecione o Colaborador:", nomes, key="sel_colab_horas")
+
+    st.markdown("---")
+    
+    if semana_info and colaborador:
+        id_semana = semana_info['id']
+        df_full = carregar_escala_semana_por_id(id_semana)
+        escala_colab = df_full[df_full['nome'] == colaborador] if not df_full.empty else pd.DataFrame()
+        
+        if escala_colab.empty:
+            st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
+            return
+            
+        dados_tabela = []
+        for _, row in escala_colab.iterrows():
+            data_dt = pd.to_datetime(row['data'])
+            dia_str = data_dt.strftime(f'%d/%m ({DIAS_SEMANA_PT[data_dt.weekday()][:3]})')
+            entrada = row['horario']
+            
+            prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ""
+            
+            dados_tabela.append({
+                "Data": dia_str,
+                "Entrada": entrada,
+                "Saída Prevista": prevista,
+                "Saída Real": "", 
+                "Feriado": False
+            })
+            
+        df_display = pd.DataFrame(dados_tabela)
+        
+        edited_df = st.data_editor(
+            df_display,
+            column_config={
+                "Data": st.column_config.TextColumn("Data", disabled=True),
+                "Entrada": st.column_config.TextColumn("Entrada Programada", disabled=True),
+                "Saída Prevista": st.column_config.TextColumn("Saída Prevista", disabled=True),
+                "Saída Real": st.column_config.TextColumn("Saída Real (ex: 15:30)"),
+                "Feriado": st.column_config.CheckboxColumn("É Feriado?", default=False)
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # --- CÁLCULO ---
+        total_extra_mins = 0
+        total_atraso_mins = 0
+        total_feriado_mins = 0
+        
+        st.markdown("### 📊 Resumo da Semana")
+        
+        for index, row in edited_df.iterrows():
+            if row['Saída Prevista'] and row['Saída Real']:
+                diff_mins = calcular_diferenca(row['Saída Prevista'], row['Saída Real'])
+                
+                if row['Feriado']:
+                    h_ent, m_ent = map(int, str(row['Entrada']).replace(" HRS", "").strip().split(':'))
+                    h_real, m_real = map(int, str(row['Saída Real']).replace("h", ":").replace("H", ":").split(':'))
+                    
+                    mins_ent = h_ent * 60 + m_ent
+                    mins_real = h_real * 60 + m_real
+                    
+                    if mins_real < mins_ent and mins_ent > 1200: mins_real += 24 * 60
+                    
+                    trabalhado_mins = (mins_real - mins_ent) - 60 
+                    if trabalhado_mins > 0:
+                        total_feriado_mins += trabalhado_mins
+                else:
+                    if diff_mins > 0:
+                        total_extra_mins += diff_mins
+                    elif diff_mins < 0:
+                        total_atraso_mins += abs(diff_mins)
+        
+        c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+        c_res1.metric("🟢 Horas Extras", formatar_minutos(total_extra_mins))
+        c_res2.metric("🔴 Atrasos / Saídas", formatar_minutos(-total_atraso_mins))
+        c_res3.metric("🔵 Feriado (Pagar na Folha)", formatar_minutos(total_feriado_mins))
+        
+        saldo_geral = total_extra_mins - total_atraso_mins
+        cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
+        c_res4.metric(f"{cor_saldo} Saldo de Banco", formatar_minutos(saldo_geral), help="Feriado não entra neste cálculo de banco.")
 
 @st.fragment
 def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
@@ -999,36 +1152,24 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
-                        # LOGICA CONDICIONAL DE CONTAGEM PARA EXCEL (EXCLUIR RECEPÇÃO/DELIVERY/MAGAZINE)
                         if is_op:
-                            # A coluna CX está em current_col + 1
                             letra_cx = num_to_col(current_col + 1)
                             rng_cx = f"{letra_cx}2:{letra_cx}{last_data_row+1}"
                             
-                            # Adicionado MAGAZINE na exclusão
-                            # 7:30 JÁ ESTÁ INCLUÍDO EM HORARIOS_MANHA POR PADRÃO
-                            crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in HORARIOS_MANHA])
-                            
-                            # PARA TARDE, ADICIONAMOS 7:30 MANUALMENTE NA LISTA
+                            # DOBRA 7:30
                             lista_h_tarde_op = HORARIOS_TARDE + ["7:30 HRS"]
-                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine")' for h in lista_h_tarde_op])
                             
-                            # --- NOVO BLOQUEIO DE DUPLICIDADE (VERMELHO) ---
-                            # FORMULA INTELIGENTE COM TRAVAMENTO DE INTERVALO ($)
+                            crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine", {rng_cx}, "<>Salinha")' for h in HORARIOS_MANHA])
+                            crit_t = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine", {rng_cx}, "<>Salinha")' for h in lista_h_tarde_op])
                             
-                            # 1. Definir intervalo absoluto (Travado com $)
                             rng_abs = f"${letra}$2:${letra}${last_data_row+1}"
                             rng_cx_abs = f"${letra_cx}$2:${letra_cx}${last_data_row+1}"
-                            
-                            # 2. Definir célula relativa (Sem $)
                             crit_cx = f"{letra_cx}2"
                             crit_h = f"{letra}2"
-                            
                             formula_dup = f'=COUNTIFS({rng_cx_abs}, {crit_cx}, {rng_abs}, {crit_h}) > 1'
                             worksheet.conditional_format(rng_cx, {'type': 'formula', 'criteria': formula_dup, 'format': fmt_duplicata})
 
                         else:
-                            # Contagem simples para empacotadores (ou outras funções)
                             crit_m = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_MANHA])
                             crit_t = ",".join([f'COUNTIF({rng}, "{h}")' for h in HORARIOS_TARDE])
                         
@@ -1062,28 +1203,28 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
     
     if not df_colaboradores.empty:
         mapa_original = {row['nome']: row['funcao'] for _, row in df_colaboradores.iterrows()}
-        # Mapa para nome social
         mapa_social = {row['nome']: row['nome_social'] for _, row in df_colaboradores.iterrows()}
+        mapa_folga = {row['nome']: row.get('folga_fixa', '') for _, row in df_colaboradores.iterrows()}
         
         df_editor = df_colaboradores.copy()
         
         col_config = {
             "nome": st.column_config.TextColumn("Nome", disabled=True),
             "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium"),
-            # ALTERADO DE nome_curto PARA nome_social
-            "nome_social": st.column_config.TextColumn("Nome Social (Para Impressão)", width="medium")
+            "nome_social": st.column_config.TextColumn("Nome Social (Para Impressão)", width="medium"),
+            "folga_fixa": st.column_config.SelectboxColumn("Folga Fixa", options=[""] + DIAS_SEMANA_PT, width="medium")
         }
         
         df_editado = st.data_editor(
-            df_editor[['nome', 'funcao', 'nome_social']], 
+            df_editor[['nome', 'funcao', 'nome_social', 'folga_fixa']], 
             column_config=col_config, 
             use_container_width=True,
             key="editor_colabs",
             num_rows="fixed"
         )
         
-        if st.button("💾 Salvar Alterações de Cargo"):
-            barra = st.progress(0, text="Atualizando cargos...")
+        if st.button("💾 Salvar Alterações"):
+            barra = st.progress(0, text="Atualizando dados...")
             total = len(df_editado)
             contador_updates = 0
             
@@ -1091,13 +1232,10 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                 nome = row['nome']
                 nova_funcao = row['funcao']
                 novo_social = row['nome_social']
+                nova_folga = row['folga_fixa']
                 
-                funcao_antiga = mapa_original.get(nome, "")
-                social_antigo = mapa_social.get(nome, "")
-                
-                if nova_funcao != funcao_antiga or novo_social != social_antigo:
-                    # ALTERADO DE nome_curto PARA nome_social
-                    atualizar_dados_colaborador(nome, nova_funcao, novo_social)
+                if nova_funcao != mapa_original.get(nome, "") or novo_social != mapa_social.get(nome, "") or nova_folga != mapa_folga.get(nome, ""):
+                    atualizar_dados_colaborador(nome, nova_funcao, novo_social, nova_folga)
                     contador_updates += 1
                 if index % 5 == 0: barra.progress((index+1)/total)
             
@@ -1145,13 +1283,9 @@ def aba_gerenciar_pedidos():
     df_pedidos = carregar_pedidos()
     
     if not df_pedidos.empty:
-        # Convert timestamp to something readable
         df_pedidos['created_at'] = pd.to_datetime(df_pedidos['created_at']).dt.strftime('%d/%m/%Y %H:%M')
-        
-        # We need a copy to edit
         df_editor = df_pedidos.copy()
         
-        # Configure the data editor
         edited_df = st.data_editor(
             df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
             column_config={
@@ -1173,14 +1307,12 @@ def aba_gerenciar_pedidos():
         )
         
         if st.button("💾 Salvar Status dos Pedidos", type="primary"):
-            # Compare edited_df with original df_pedidos to find changes
             count = 0
             for index, row in edited_df.iterrows():
                 original_status = df_pedidos.loc[df_pedidos['id'] == row['id'], 'status'].values[0]
                 if row['status'] != original_status:
                     if atualizar_status_pedido(row['id'], row['status']):
                         count += 1
-            
             if count > 0:
                 st.success(f"{count} pedidos atualizados!")
                 time.sleep(1.5)
@@ -1188,7 +1320,6 @@ def aba_gerenciar_pedidos():
                 st.rerun()
             else:
                 st.info("Nenhuma alteração detectada.")
-                
     else:
         st.info("Nenhum pedido encontrado.")
 
@@ -1223,7 +1354,6 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     df_dia = df_full[pd.to_datetime(df_full['data']).dt.date == data_selecionada].copy()
     if df_dia.empty: df_dia = pd.DataFrame(columns=['nome', 'funcao', 'horario', 'numero_caixa'])
 
-    # ADDED RECEPÇÃO TO OPS BASE
     df_ops_base = df_colaboradores[df_colaboradores['funcao'].isin(['Operador(a) de Caixa', 'Recepção'])]
     df_emp_base = df_colaboradores[df_colaboradores['funcao'] == 'Empacotador(a)']
 
@@ -1233,14 +1363,9 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     df_ops_final = df_ops_final.sort_values('nome')
     df_emp_final = df_emp_final.sort_values('nome')
 
-    # ADD EDITABLE PRINT NAME COLUMN
-    # Logic: If 'nome_social' exists in DB (merged), use it. Otherwise use 'nome'.
-    
-    # Ensure columns exist even if merge failed slightly
     if 'nome_social' not in df_ops_final.columns: df_ops_final['nome_social'] = ""
     if 'nome_social' not in df_emp_final.columns: df_emp_final['nome_social'] = ""
 
-    # Pre-fill 'nome_impressao' based on 'nome_social'
     df_ops_final['nome_impressao'] = df_ops_final.apply(
         lambda row: row['nome_social'] if pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "" else row['nome'], 
         axis=1
@@ -1308,14 +1433,15 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
-        t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📌 Pedidos", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
+        t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📌 Pedidos", "⏱️ Controle Horas", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
         with t3: aba_escala_diaria_impressao(df_colaboradores, df_semanas_ativas)
         with t4: aba_gerenciar_pedidos() 
-        with t5: aba_importar_excel(df_colaboradores, df_semanas_ativas)
-        with t6: aba_gerenciar_colaboradores(df_colaboradores)
-        with t7: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
+        with t5: aba_controle_horas(df_colaboradores, df_semanas_ativas)
+        with t6: aba_importar_excel(df_colaboradores, df_semanas_ativas)
+        with t7: aba_gerenciar_colaboradores(df_colaboradores)
+        with t8: aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
     else:
         aba_consultar_escala_publica(df_colaboradores, df_semanas_ativas)
 
