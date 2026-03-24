@@ -895,9 +895,22 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
             data_inicio = data_sel - timedelta(days=data_sel.weekday())
             if inicializar_semana_simples(data_inicio):
                 st.cache_data.clear(); st.success("Semana inicializada com as Folgas Fixas!"); time.sleep(1.5); st.rerun()
-    st.markdown("---"); st.markdown("##### 📂 Histórico")
+    
+    st.markdown("---"); st.markdown("##### 📂 Histórico de Semanas")
+    
     if not df_semanas_todas.empty:
-        for index, row in df_semanas_todas.iterrows():
+        mostrar_arquivadas = st.toggle("📂 Mostrar APENAS semanas arquivadas", value=False)
+        
+        if mostrar_arquivadas:
+            df_view = df_semanas_todas[df_semanas_todas['ativa'] == False]
+            if df_view.empty:
+                st.info("Nenhuma semana arquivada.")
+        else:
+            df_view = df_semanas_todas[df_semanas_todas['ativa'] == True]
+            if df_view.empty:
+                st.info("Nenhuma semana ativa no momento.")
+                
+        for index, row in df_view.iterrows():
             c1, c2, c3 = st.columns([4, 1, 1])
             status_icon = "🟢" if row['ativa'] else "📁"
             c1.markdown(f"**{status_icon} {row['nome_semana']}**")
@@ -908,7 +921,8 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
             else:
                 if c2.button("Reativar", key=key_arch):
                     arquivar_reativar_semana(row['id'], True); st.cache_data.clear(); st.rerun()
-    else: st.info("Nenhuma semana criada.")
+    else: 
+        st.info("Nenhuma semana criada.")
 
 @st.fragment
 def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
