@@ -748,14 +748,13 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     elif diff_mins < 0:
                         total_atraso_mins += abs(diff_mins)
             
-            # APENAS 3 MÉTRICAS COMO SOLICITADO
-            c_res1, c_res2, c_res3 = st.columns(3)
-            c_res1.metric("🟢 Extras Aprox.", formatar_minutos(total_extra_mins))
-            c_res2.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
+            # APENAS 2 MÉTRICAS AGORA
+            c_res1, c_res2 = st.columns(2)
+            c_res1.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
             
             saldo_geral = total_extra_mins - total_atraso_mins
             cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
-            c_res3.metric(f"{cor_saldo} Saldo Estimado", formatar_minutos(saldo_geral))
+            c_res2.metric(f"{cor_saldo} Saldo Estimado", formatar_minutos(saldo_geral))
 
     st.markdown("---")
     st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
