@@ -218,7 +218,6 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
                     d = data_inicio + timedelta(days=i)
                     dia_semana_nome = DIAS_SEMANA_PT[d.weekday()]
                     
-                    # Automagicamente preenche a folga se for o dia da folga fixa
                     horario_padrao = "Folga" if folga_fixa == dia_semana_nome else ""
                     
                     supabase.rpc('save_escala_dia_final', {
@@ -289,7 +288,7 @@ def carregar_fiscais() -> pd.DataFrame:
         {"codigo": 1016, "nome": "Amanda", "senha": "5"}
     ])
 
-# --- FUNÇÕES DE IMPRESSÃO ---
+# --- FUNÇÕES DE IMPRESSÃO E LAYOUT ---
 
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
     tabela_html = df_escala.to_html(index=False, border=0, justify="center", classes="tabela-escala")
@@ -306,7 +305,6 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
             h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
             table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }}
             table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
-            /* white-space: nowrap GARANTE QUE A PALAVRA NÃO SEJA CORTADA NA IMPRESSÃO */
             table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; white-space: nowrap; }}
             table.tabela-escala tr:last-child td {{ border-bottom: none; }}
             table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
@@ -323,7 +321,6 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     </html>
     """
 
-# --- NOVA FUNÇÃO: LAYOUT COMPACTO COM PULO DE LINHA (SPACERS) ---
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_tema):
     
     lista_op_folga = []
@@ -334,11 +331,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     c_op_tarde = 0; c_self_tarde = 0
     c_emp_manha = 0; c_emp_tarde = 0
 
-    # --- LISTAS PLANAS ---
     flat_ops_data = []
     flat_emp_data = []
 
-    # --- PROCESSA OPERADORAS ---
     def sort_key_caixa(row):
         cx = str(row.get('numero_caixa', '')).strip().upper()
         cx = cx.replace('.0', '')
@@ -373,8 +368,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE", "SALINHA"])
 
-        # === LÓGICA DE CONTAGEM (COM DOBRA DE 7:30) ===
-        if mins == 450: # 7:30 HRS = 450 min
+        if mins == 450: # 7:30 HRS 
             if is_self: c_self_manha += 1
             elif not is_excluded_count: c_op_manha += 1
             if is_self: c_self_tarde += 1
@@ -398,9 +392,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             'has_separator': False
         })
 
-    # --- PROCESSA EMPACOTADORES ---
     df_emp_sorted = df_emp_dia.sort_values(by='nome')
-    
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
         
@@ -436,11 +428,9 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             'has_separator': False
         })
 
-    # --- ORDENAÇÃO ---
     flat_ops_data.sort(key=lambda x: (x['mins'], -x['rank']))
     flat_emp_data.sort(key=lambda x: (x['mins'], x['nome']))
 
-    # --- DETECÇÃO DE SEPARADOR ---
     for i in range(len(flat_ops_data) - 1):
         if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']:
             flat_ops_data[i]['has_separator'] = True
@@ -449,20 +439,14 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']:
             flat_emp_data[i]['has_separator'] = True
 
-    # --- INJEÇÃO DE ESPAÇOS EM BRANCO (SPACERS) PARA EMPACOTADORES ---
     final_emp_list = []
     for emp in flat_emp_data:
         final_emp_list.append(emp)
         if emp.get('has_separator'):
             final_emp_list.append(None) 
             
-    # --- MONTA AS LINHAS ---
     rows_html = ""
-    
-    # Usa a lista modificada final_emp_list
     for op, emp in zip_longest(flat_ops_data, final_emp_list, fillvalue=None):
-        
-        # Op
         op_html = ""
         op_class_extra = " separator-bottom" if (op and op['has_separator']) else ""
         if op:
@@ -470,15 +454,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         else:
             op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
         
-        # Emp
         emp_html = ""
-        # Verifica se é um empacotador real ou espaço
         emp_class_extra = " separator-bottom" if (emp and emp.get('has_separator')) else ""
-        
         if emp:
             emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
         else:
-            # É um None (Espaço injetado ou fim de lista)
             emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
             
         rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
@@ -507,103 +487,30 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         <title>Escala {dia_semana}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap');
-            
-            @page {{ 
-                size: portrait; 
-                margin: 5mm; 
-            }}
-
-            body {{ 
-                font-family: 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif; 
-                color: #000; 
-                margin: 0; 
-                padding: 10px; 
-                background: white; 
-                font-size: 16px; 
-                width: 90%; 
-                margin-left: auto; 
-                margin-right: auto;
-                zoom: 90%; 
-            }}
-            
-            .print-frame {{
-                border: 4px solid {cor_tema}; 
-                padding: 15px; 
-                width: 100%;
-                box-sizing: border-box;
-            }}
-            
-            .header-main {{ 
-                text-align: center;
-                border-bottom: 3px solid {cor_tema}; 
-                padding-bottom: 5px; 
-                margin-bottom: 3px;
-            }}
+            @page {{ size: portrait; margin: 5mm; }}
+            body {{ font-family: 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif; color: #000; margin: 0; padding: 10px; background: white; font-size: 16px; width: 90%; margin-left: auto; margin-right: auto; zoom: 90%; }}
+            .print-frame {{ border: 4px solid {cor_tema}; padding: 15px; width: 100%; box-sizing: border-box; }}
+            .header-main {{ text-align: center; border-bottom: 3px solid {cor_tema}; padding-bottom: 5px; margin-bottom: 3px; }}
             .header-dia {{ font-size: 42px; font-weight: 900; text-transform: uppercase; line-height: 0.9; margin-bottom: 2px; }}
             .header-data {{ font-size: 28px; font-weight: bold; line-height: 1; color: #000; }}
-
-            table {{ 
-                width: 100%; 
-                border-collapse: collapse; 
-                border: 2px solid {cor_tema}; 
-                margin-bottom: 2px; 
-                table-layout: fixed; 
-            }}
-            
-            thead th {{ 
-                background-color: {cor_tema} !important; 
-                color: #fff !important; 
-                padding: 6px; 
-                text-transform: uppercase; 
-                border: 1px solid {cor_tema}; 
-                font-size: 19px; 
-                text-align: center;
-                -webkit-print-color-adjust: exact; 
-            }}
-            
-            td {{ 
-                padding: 4px; 
-                border: 1px solid {cor_tema}; 
-                height: 28px; 
-                vertical-align: middle;
-                white-space: nowrap; 
-                overflow: hidden;
-                text-align: center; 
-            }}
-            
-            /* CLASSE PARA A LINHA PRETA GROSSA NO FINAL DO HORÁRIO */
-            .separator-bottom {{
-                border-bottom: 4px solid #000 !important;
-            }}
-            
+            table {{ width: 100%; border-collapse: collapse; border: 2px solid {cor_tema}; margin-bottom: 2px; table-layout: fixed; }}
+            thead th {{ background-color: {cor_tema} !important; color: #fff !important; padding: 6px; text-transform: uppercase; border: 1px solid {cor_tema}; font-size: 19px; text-align: center; -webkit-print-color-adjust: exact; }}
+            td {{ padding: 4px; border: 1px solid {cor_tema}; height: 28px; vertical-align: middle; white-space: nowrap; overflow: hidden; text-align: center; }}
+            .separator-bottom {{ border-bottom: 4px solid #000 !important; }}
             .cx-col {{ width: 8%; font-weight: bold; font-size: 20px; }} 
             .col-op-nome {{ width: 31.5%; font-weight: bold; font-size: 18px; }} 
             .horario-col {{ width: 10%; font-weight: bold; font-size: 18px; }} 
-            
-            .divider-col {{
-                width: 1%;
-                background-color: {cor_tema} !important;
-                padding: 0;
-                border: none;
-                -webkit-print-color-adjust: exact;
-            }}
-
+            .divider-col {{ width: 1%; background-color: {cor_tema} !important; padding: 0; border: none; -webkit-print-color-adjust: exact; }}
             .col-emp-nome {{ width: 39.5%; font-weight: bold; font-size: 18px; }} 
-            
             .nome-col {{ font-weight: bold; text-transform: uppercase; letter-spacing: -0.5px; }}
-            
             .border-left {{ border-left: 3px solid {cor_tema}; }}
-
             tr:nth-child(even) {{ background-color: #d9d9d9 !important; -webkit-print-color-adjust: exact; }}
-            
             .footer-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; }}
             .footer-box {{ width: 50%; }}
             .footer-header {{ background: {cor_tema} !important; color: #fff !important; text-align: center; font-weight: bold; font-size: 14px; padding: 4px; -webkit-print-color-adjust: exact; }}
             .footer-content {{ background: #eee !important; font-size: 14px; padding: 6px; text-align: center; min-height: 40px; text-transform: uppercase; -webkit-print-color-adjust: exact; line-height: 1.2; white-space: normal; }}
-            
             .totals-container {{ display: flex; border: 2px solid {cor_tema}; border-top: none; background: {cor_tema} !important; color: #fff !important; -webkit-print-color-adjust: exact; }}
             .totals-box {{ width: 50%; font-size: 12px; font-weight: bold; padding: 6px; text-align: center; line-height: 1.3; }}
-
             @media print {{
                 body {{ padding: 0; margin: 0 auto; width: 90%; zoom: 90%; }}
                 thead th, .footer-header, .totals-container {{ background-color: {cor_tema} !important; color: #fff !important; }}
@@ -618,7 +525,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 <div class="header-dia">{dia_semana}</div>
                 <div class="header-data">DATA: <span style="color: {cor_tema}">{data_str}</span></div>
             </div>
-
             <table>
                 <thead>
                     <tr>
@@ -634,7 +540,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                     {rows_html}
                 </tbody>
             </table>
-
             <div class="footer-container">
                 <div class="footer-box" style="border-right: 2px solid {cor_tema};">
                     <div class="footer-header">FOLGAS OPERADORES</div>
@@ -645,7 +550,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                     <div class="footer-content">{str_folga_emp}</div>
                 </div>
             </div>
-
             <div class="totals-container">
                 <div class="totals-box" style="border-right: 1px solid #fff;">
                     {resumo_op}
@@ -677,10 +581,9 @@ def calcular_saida_prevista(entrada_str):
     try:
         time_part = str(entrada_str).replace(" HRS", "").strip()
         h, m = map(int, time_part.split(':'))
-        
         intervalo_mins = obter_intervalo_minutos(h, m)
         
-        # Regra: 7h20 de trabalho (440 minutos) + tempo de intervalo
+        # 7h20 de trabalho (440 minutos) + tempo de intervalo
         td_entrada = timedelta(hours=h, minutes=m)
         td_saida = td_entrada + timedelta(minutes=(440 + intervalo_mins))
         
@@ -688,7 +591,6 @@ def calcular_saida_prevista(entrada_str):
         out_h = (total_minutes // 60) % 24
         out_m = total_minutes % 60
         
-        # Cria a string bonitinha do intervalo
         if intervalo_mins == 15: str_int = "15 min (Só Café)"
         elif intervalo_mins == 75: str_int = "1h 15m (Almoço+Café)"
         elif intervalo_mins == 90: str_int = "1h 30m"
@@ -699,17 +601,62 @@ def calcular_saida_prevista(entrada_str):
     except:
         return "", ""
 
+def calcular_saida_estimada(entrada_str, prevista_str, is_domingo_feriado):
+    if not entrada_str or "HRS" not in str(entrada_str): return ""
+    try:
+        time_part = str(entrada_str).replace(" HRS", "").strip()
+        h, m = map(int, time_part.split(':'))
+        mins = h * 60 + m
+        
+        if is_domingo_feriado:
+            if mins == 410: return "12:50" # 6:50
+            if mins == 450: return "13:10" # 7:30
+            if mins == 480: return "13:30" # 8:00
+            return prevista_str
+        else:
+            if mins == 570 or mins == 600: # 9:30 or 10:00
+                return "19:05"
+            elif mins >= 660: # 11:00 em diante
+                return "20:45"
+            else:
+                return prevista_str # Manhã sai cravado
+    except:
+        return prevista_str
+
+def calcular_diferenca(prevista_str, estimada_str):
+    if not prevista_str or not estimada_str: return 0
+    try:
+        ph, pm = map(int, str(prevista_str).split(':'))
+        eh, em = map(int, str(estimada_str).replace("h", ":").replace("H", ":").split(':'))
+        
+        mins_prev = ph * 60 + pm
+        mins_est = eh * 60 + em
+        
+        if mins_est < mins_prev and mins_prev > 1200: 
+            mins_est += 24 * 60
+            
+        return mins_est - mins_prev
+    except:
+        return 0
+
+def formatar_minutos(total_mins):
+    if total_mins == 0: return "00h 00m"
+    sign = "+" if total_mins > 0 else "-"
+    total_mins = abs(total_mins)
+    h = total_mins // 60
+    m = total_mins % 60
+    return f"{sign} {h:02d}h {m:02d}m"
+
 # --- ABAS ---
 
 @st.fragment
 def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("⏱️ Controle de Horas e Calculadora")
-    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para apurar horas extras ou atrasos na hora de passar pro sistema.")
+    st.info("A tabela gera a Saída Estimada automaticamente para te dar uma prévia do Saldo da Semana e Horas de Feriado.")
     
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
 
-    # Filtro: Todos MENOS Empacotadores
     df_horas = df_colaboradores[df_colaboradores['funcao'] != 'Empacotador(a)']
     
     c1, c2 = st.columns(2)
@@ -736,20 +683,91 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 data_dt = pd.to_datetime(row['data'])
                 dia_str = data_dt.strftime(f'%d/%m ({DIAS_SEMANA_PT[data_dt.weekday()][:3]})')
                 entrada = row['horario']
+                is_domingo = (data_dt.weekday() == 6)
                 
                 intervalo, prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ("", "")
+                estimada_padrao = calcular_saida_estimada(entrada, prevista, is_domingo)
                 
                 dados_tabela.append({
                     "Data": dia_str,
                     "Entrada Escala": entrada,
                     "Tempo Almoço/Café": intervalo,
-                    "Saída Prevista (Cravada)": prevista
+                    "Saída Prevista (Cravada)": prevista,
+                    "Saída Estimada (Aprox)": estimada_padrao,
+                    "Dom / Feriado?": is_domingo
                 })
                 
             df_display = pd.DataFrame(dados_tabela)
             
             st.markdown(f"#### 📅 Escala Prevista da Semana: `{colaborador}`")
-            st.dataframe(df_display, hide_index=True, use_container_width=True)
+            
+            edited_df = st.data_editor(
+                df_display,
+                column_config={
+                    "Data": st.column_config.TextColumn("Data", disabled=True),
+                    "Entrada Escala": st.column_config.TextColumn("Entrada Programada", disabled=True),
+                    "Tempo Almoço/Café": st.column_config.TextColumn("Tempo Almoço/Café", disabled=True),
+                    "Saída Prevista (Cravada)": st.column_config.TextColumn("Saída Prevista", disabled=True),
+                    "Saída Estimada (Aprox)": st.column_config.TextColumn("Saída Estimada (Editável)"),
+                    "Dom / Feriado?": st.column_config.CheckboxColumn("Dom / Feriado?")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # --- CÁLCULO ---
+            total_extra_mins = 0
+            total_atraso_mins = 0
+            total_domingo_feriado_mins = 0
+            
+            st.markdown("### 📊 Resumo da Semana")
+            
+            for index, row in edited_df.iterrows():
+                entrada_str = row['Entrada Escala']
+                prevista_str = row['Saída Prevista (Cravada)']
+                estimada_str = row['Saída Estimada (Aprox)']
+                is_feriado = row['Dom / Feriado?']
+                
+                if prevista_str and estimada_str:
+                    if is_feriado:
+                        # Cálculo especial para Domingo/Feriado pago por fora
+                        try:
+                            h_ent, m_ent = map(int, str(entrada_str).replace(" HRS", "").strip().split(':'))
+                            h_est, m_est = map(int, str(estimada_str).replace("h", ":").replace("H", ":").split(':'))
+                            mins_ent = h_ent * 60 + m_ent
+                            mins_est = h_est * 60 + m_est
+                            
+                            if mins_est < mins_ent and mins_ent > 1200: mins_est += 24 * 60
+                            
+                            trabalhado_bruto = mins_est - mins_ent
+                            
+                            # Se for escala cheia (> 6h30m), deduz o almoço padrão. Se for escala curta, conta direto.
+                            if trabalhado_bruto > 390:
+                                int_padrao = obter_intervalo_minutos(h_ent, m_ent)
+                                trabalhado_liquido = trabalhado_bruto - int_padrao
+                            else:
+                                trabalhado_liquido = trabalhado_bruto
+                                
+                            if trabalhado_liquido > 0:
+                                total_domingo_feriado_mins += trabalhado_liquido
+                        except:
+                            pass
+                    else:
+                        # Dia normal, calcula pro banco de horas
+                        diff_mins = calcular_diferenca(prevista_str, estimada_str)
+                        if diff_mins > 0:
+                            total_extra_mins += diff_mins
+                        elif diff_mins < 0:
+                            total_atraso_mins += abs(diff_mins)
+            
+            c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+            c_res1.metric("🟢 Extras Aprox. (Banco)", formatar_minutos(total_extra_mins))
+            c_res2.metric("🔴 Atrasos Aprox. (Banco)", formatar_minutos(-total_atraso_mins))
+            c_res3.metric("🔵 Feriado / Dom (Pagar)", formatar_minutos(total_domingo_feriado_mins))
+            
+            saldo_geral = total_extra_mins - total_atraso_mins
+            cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
+            c_res4.metric(f"{cor_saldo} Saldo Estimado (Banco)", formatar_minutos(saldo_geral), help="Feriado/Dom não entra neste saldo.")
 
     st.markdown("---")
     st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
@@ -767,26 +785,14 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         st.markdown("<br>", unsafe_allow_html=True)
         st.info("Cálculo Automático ⬇️")
     
-    # Fazendo o cálculo da calculadora avulsa
     mins_entrada = calc_entrada.hour * 60 + calc_entrada.minute
     mins_saida = calc_saida.hour * 60 + calc_saida.minute
     
-    if mins_saida < mins_entrada: # Passou da meia noite
+    if mins_saida < mins_entrada: 
         mins_saida += 24 * 60
         
-    mapa_almoco = {
-        "Sem almoço": 0,
-        "1 hora": 60,
-        "1 hora e 30 min": 90,
-        "2 horas": 120
-    }
-    
-    mapa_cafe = {
-        "Sem café": 0,
-        "10 min": 10,
-        "15 min": 15,
-        "30 min": 30
-    }
+    mapa_almoco = { "Sem almoço": 0, "1 hora": 60, "1 hora e 30 min": 90, "2 horas": 120 }
+    mapa_cafe = { "Sem café": 0, "10 min": 10, "15 min": 15, "30 min": 30 }
     
     desc_almoco = mapa_almoco[calc_almoco]
     desc_cafe = mapa_cafe[calc_cafe]
@@ -863,7 +869,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     st.markdown("---")
 
     with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
-        # FORMULÁRIO PARA EVITAR O ERRO DE SESSION STATE E LIMPAR A CAIXA AUTOMATICAMENTE
         with st.form("form_novo_pedido", clear_on_submit=True):
             nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
             c_p1, c_p2 = st.columns([1, 2])
@@ -1046,7 +1051,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             for i in range(7):
                 d_str = (data_ini + timedelta(days=i)).strftime('%d/%m/%Y')
                 colunas.append(d_str)
-                # Adiciona coluna extra para Operador (CX) E Empacotador (Tarefa)
                 if funcao_selecionada == "Operador(a) de Caixa":
                      colunas.append(f"CX_REF_{d_str}")
                 elif funcao_selecionada == "Empacotador(a)":
@@ -1087,20 +1091,16 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter', 'border': 1})
-                    
-                    # FORMATO PARA ERRO DE DUPLICATA
                     fmt_duplicata = workbook.add_format({'bg_color': '#FF0000', 'font_color': '#FFFFFF', 'bold': True, 'align': 'center'})
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
                     ws_data.write_column('A1', HORARIOS_PADRAO)
-                    # Escreve as duas listas para validação
                     ws_data.write_column('B1', LISTA_OPCOES_CAIXA)
                     ws_data.write_column('C1', LISTA_TAREFAS_EMPACOTADOR)
                     
                     fmt_nome = workbook.add_format({'border': 1, 'valign': 'vcenter', 'align': 'left'})
                     worksheet.write(0, 0, "Nome", fmt_bold)
                     
-                    # AJUSTE DA LARGURA DA COLUNA NOME
                     is_op = (funcao_selecionada == "Operador(a) de Caixa")
                     is_emp = (funcao_selecionada == "Empacotador(a)")
                     
@@ -1122,12 +1122,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             info = dados_existentes.get((row_name, d_atual), {})
                             
                             h_val = info.get('horario', "")
-                            
-                            # --- LÓGICA: ATUALIZA FOLGA FIXA NO EXCEL ---
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                             
-                            # Garante que a folga fixa esteja preenchida
                             if folga_fixa_colab == dia_semana_atual:
                                 h_val = "Folga"
                             
@@ -1169,7 +1166,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': valid_list})
                             col_idx += 1
                     
-                    # --- TOTAIS ---
                     mapa_nomes = {"Operador(a) de Caixa": "Operadoras", "Empacotador(a)": "Empacotadores", "Fiscal de Caixa": "Fiscais", "Recepção": "Recepção"}
                     nome_cargo = mapa_nomes.get(funcao_selecionada, funcao_selecionada)
                     
@@ -1339,7 +1335,7 @@ def aba_gerenciar_pedidos():
             edited_df = st.data_editor(
                 df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
                 column_config={
-                    "id": None, # ESCONDE A COLUNA ID
+                    "id": None, 
                     "created_at": st.column_config.TextColumn("Data do Pedido", disabled=True),
                     "nome": st.column_config.TextColumn("Nome", disabled=True),
                     "descricao": st.column_config.TextColumn("Pedido/Solicitação", disabled=True, width="large"),
