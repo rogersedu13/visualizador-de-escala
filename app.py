@@ -74,6 +74,7 @@ except Exception:
 # --- Estado da Sessão ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
+if "txt_pedido" not in st.session_state: st.session_state.txt_pedido = ""
 
 # --- Funções Auxiliares ---
 
@@ -704,7 +705,7 @@ def calcular_saida_prevista(entrada_str):
 @st.fragment
 def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("⏱️ Controle de Horas e Calculadora")
-    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para horas extras ou atrasos na hora de passar pro sistema.")
+    st.info("Consulte as saídas previstas da semana na tabela e use a calculadora abaixo para apurar horas extras ou atrasos na hora de passar pro sistema.")
     
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
@@ -741,9 +742,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 
                 dados_tabela.append({
                     "Data": dia_str,
-                    "Entrada": entrada,
+                    "Entrada Escala": entrada,
                     "Tempo Almoço/Café": intervalo,
-                    "Saída": prevista
+                    "Saída Prevista (Cravada)": prevista
                 })
                 
             df_display = pd.DataFrame(dados_tabela)
@@ -752,13 +753,13 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             st.dataframe(df_display, hide_index=True, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### 🧮 Calculadora Avulsa de Horas")
+    st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
     
     col_calc1, col_calc2, col_calc3, col_calc4, col_calc5 = st.columns(5)
     with col_calc1:
-        calc_entrada = st.time_input("Entrada", datetime.time(6, 50))
+        calc_entrada = st.time_input("Entrada (Real)", datetime.time(6, 50))
     with col_calc2:
-        calc_saida = st.time_input("Saída", datetime.time(15, 10))
+        calc_saida = st.time_input("Saída (Real)", datetime.time(15, 10))
     with col_calc3:
         calc_almoco = st.selectbox("Tempo Almoço", ["1 hora", "1 hora e 30 min", "2 horas", "Sem almoço"])
     with col_calc4:
@@ -799,19 +800,19 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
     res1, res2 = st.columns(2)
     trab_h = trabalhado_liquido // 60
     trab_m = trabalhado_liquido % 60
-    res1.metric("Total Trabalhado", f"{trab_h:02d}h {trab_m:02d}m")
+    res1.metric("Total Trabalhado (Líquido)", f"{trab_h:02d}h {trab_m:02d}m")
     
     if diferenca > 0:
         diff_h = diferenca // 60
         diff_m = diferenca % 60
-        res2.metric("Saldo do Dia", f"+ {diff_h:02d}h {diff_m:02d}m", "Hora Extra")
+        res2.metric("Saldo do Dia", f"+ {diff_h:02d}h {diff_m:02d}m", "Hora Extra (Lançar Positivo)")
     elif diferenca < 0:
         diff_abs = abs(diferenca)
         diff_h = diff_abs // 60
         diff_m = diff_abs % 60
         res2.metric("Saldo do Dia", f"- {diff_h:02d}h {diff_m:02d}m", "Atraso / Faltou Tempo", delta_color="inverse")
     else:
-        res2.metric("Saldo do Dia", "00h 00m", "(Sem hora extra")
+        res2.metric("Saldo do Dia", "00h 00m", "Cravado (Sem extra/atraso)")
 
 
 @st.fragment
@@ -868,13 +869,15 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
         with c_p1:
             nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido, key="sel_nome_pedido")
         with c_p2:
-            texto_pedido = st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
+            st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
         
         if st.button("🚀 Enviar Pedido", type="primary"):
-            if texto_pedido:
-                if salvar_pedido(nome_pedido, texto_pedido):
-                    st.success("Pedido enviado com sucesso! O fiscal irá analisar.")
-                    time.sleep(2)
+            if st.session_state.txt_pedido.strip():
+                if salvar_pedido(nome_pedido, st.session_state.txt_pedido):
+                    st.success("✅ SEU PEDIDO FOI ENVIADO COM SUCESSO! O fiscal irá analisar.")
+                    st.balloons()
+                    st.session_state.txt_pedido = ""
+                    time.sleep(2.5)
                     st.rerun()
             else:
                 st.warning("Escreva algo no pedido antes de enviar.")
@@ -1104,7 +1107,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             
                             h_val = info.get('horario', "")
                             
-                            # --- NOVA LÓGICA: ATUALIZA FOLGA FIXA NO EXCEL ---
+                            # --- LÓGICA: ATUALIZA FOLGA FIXA NO EXCEL ---
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                             
@@ -1112,12 +1115,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                                 h_val = "Folga"
                             elif h_val == "Folga" and folga_fixa_colab != "" and folga_fixa_colab != dia_semana_atual:
                                 h_val = ""
-                            # -------------------------------------------------
                             
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
-                            # Logica para recepção e operadora usarem a mesma lista de caixas
                             is_recep = (funcao_selecionada == "Recepção")
                             
                             if is_op or is_emp or is_recep:
@@ -1175,12 +1176,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         letra = num_to_col(current_col)
                         rng = f"{letra}2:{letra}{last_data_row+1}"
                         
-                        # LOGICA CONDICIONAL DE CONTAGEM PARA EXCEL 
                         if is_op:
                             letra_cx = num_to_col(current_col + 1)
                             rng_cx = f"{letra_cx}2:{letra_cx}{last_data_row+1}"
                             
-                            # DOBRA 7:30
                             lista_h_tarde_op = HORARIOS_TARDE + ["7:30 HRS"]
                             
                             crit_m = ",".join([f'COUNTIFS({rng}, "{h}", {rng_cx}, "<>Recepção", {rng_cx}, "<>Delivery", {rng_cx}, "<>Magazine", {rng_cx}, "<>Salinha")' for h in HORARIOS_MANHA])
@@ -1302,48 +1301,57 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
 @st.fragment
 def aba_gerenciar_pedidos():
     st.subheader("📌 Gerenciar Pedidos e Solicitações")
-    st.info("Visualize os pedidos das operadoras e atualize o status.")
+    st.info("Visualize os pedidos das operadoras e atualize o status. Pedidos 'Concluídos' são arquivados automaticamente.")
     
     df_pedidos = carregar_pedidos()
     
     if not df_pedidos.empty:
         df_pedidos['created_at'] = pd.to_datetime(df_pedidos['created_at']).dt.strftime('%d/%m/%Y %H:%M')
-        df_editor = df_pedidos.copy()
         
-        edited_df = st.data_editor(
-            df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
-            column_config={
-                "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-                "created_at": st.column_config.TextColumn("Data do Pedido", disabled=True),
-                "nome": st.column_config.TextColumn("Nome", disabled=True),
-                "descricao": st.column_config.TextColumn("Pedido/Solicitação", disabled=True, width="large"),
-                "status": st.column_config.SelectboxColumn(
-                    "Status",
-                    options=["Pendente", "Concluido"],
-                    required=True,
-                    width="medium"
-                )
-            },
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            key="editor_pedidos"
-        )
+        mostrar_arquivados = st.toggle("📂 Mostrar pedidos arquivados (Concluídos)", value=False)
         
-        if st.button("💾 Salvar Status dos Pedidos", type="primary"):
-            count = 0
-            for index, row in edited_df.iterrows():
-                original_status = df_pedidos.loc[df_pedidos['id'] == row['id'], 'status'].values[0]
-                if row['status'] != original_status:
-                    if atualizar_status_pedido(row['id'], row['status']):
-                        count += 1
-            if count > 0:
-                st.success(f"{count} pedidos atualizados!")
-                time.sleep(1.5)
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.info("Nenhuma alteração detectada.")
+        if mostrar_arquivados:
+            df_editor = df_pedidos.copy()
+        else:
+            df_editor = df_pedidos[df_pedidos['status'] == 'Pendente'].copy()
+            
+        if df_editor.empty:
+            st.success("🎉 Nenhum pedido pendente no momento!")
+        else:
+            edited_df = st.data_editor(
+                df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
+                column_config={
+                    "id": None, # ESCONDE A COLUNA ID
+                    "created_at": st.column_config.TextColumn("Data do Pedido", disabled=True),
+                    "nome": st.column_config.TextColumn("Nome", disabled=True),
+                    "descricao": st.column_config.TextColumn("Pedido/Solicitação", disabled=True, width="large"),
+                    "status": st.column_config.SelectboxColumn(
+                        "Status",
+                        options=["Pendente", "Concluido"],
+                        required=True,
+                        width="medium"
+                    )
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed",
+                key="editor_pedidos"
+            )
+            
+            if st.button("💾 Salvar Status dos Pedidos", type="primary"):
+                count = 0
+                for index, row in edited_df.iterrows():
+                    original_status = df_pedidos.loc[df_pedidos['id'] == row['id'], 'status'].values[0]
+                    if row['status'] != original_status:
+                        if atualizar_status_pedido(row['id'], row['status']):
+                            count += 1
+                if count > 0:
+                    st.success(f"{count} pedidos atualizados!")
+                    time.sleep(1.5)
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.info("Nenhuma alteração detectada.")
     else:
         st.info("Nenhum pedido encontrado.")
 
