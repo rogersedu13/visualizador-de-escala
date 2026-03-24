@@ -581,13 +581,11 @@ def calcular_saida_prevista(entrada_str, is_domingo_feriado=False):
         time_part = str(entrada_str).replace(" HRS", "").strip()
         h, m = map(int, time_part.split(':'))
         
-        # NO DOMINGO/FERIADO SÓ TEM 10 MIN DE CAFÉ (NÃO TEM ALMOÇO PADRÃO)
         if is_domingo_feriado:
             intervalo_mins = 10
         else:
             intervalo_mins = obter_intervalo_minutos(h, m)
         
-        # 7h20 de trabalho (440 minutos) + tempo de intervalo
         td_entrada = timedelta(hours=h, minutes=m)
         td_saida = td_entrada + timedelta(minutes=(440 + intervalo_mins))
         
@@ -625,7 +623,7 @@ def calcular_saida_estimada(entrada_str, prevista_str, is_domingo_feriado):
             elif mins >= 660: # 11:00 em diante
                 return "20:45"
             else:
-                return prevista_str # Manhã sai cravado
+                return prevista_str
     except:
         return prevista_str
 
@@ -638,7 +636,8 @@ def calcular_diferenca(prevista_str, estimada_str):
         mins_prev = ph * 60 + pm
         mins_est = eh * 60 + em
         
-        if mins_est < mins_prev and mins_prev > 1200: 
+        # Correção da virada da noite (só aplica se sair de madrugada e deveria sair tarde da noite)
+        if mins_est < mins_prev and mins_prev > 1200 and mins_est < 480: 
             mins_est += 24 * 60
             
         return mins_est - mins_prev
@@ -684,7 +683,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if escala_colab.empty:
             st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
         else:
-            # FORÇA A ORDENAÇÃO PELO DIA DA SEMANA PARA NÃO FICAR EMBARALHADO
             escala_colab = escala_colab.sort_values('data')
             
             dados_tabela = []
@@ -694,7 +692,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 entrada = row['horario']
                 is_domingo = (data_dt.weekday() == 6)
                 
-                # A saída prevista do início é apenas visual. Será recalculada no loop de baixo com base na caixinha.
                 intervalo, prevista = calcular_saida_prevista(entrada, is_domingo) if "HRS" in str(entrada) else ("", "")
                 estimada_padrao = calcular_saida_estimada(entrada, prevista, is_domingo)
                 
@@ -725,7 +722,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 use_container_width=True
             )
             
-            # --- CÁLCULO GERAL (Tudo vai pro banco da mesma forma) ---
             total_extra_mins = 0
             total_atraso_mins = 0
             
@@ -736,11 +732,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 estimada_str = row['Saída Estimada (Aprox)']
                 is_feriado = row['Dom / Feriado?']
                 
-                # Recalcula a prevista caso a pessoa marque o feriado manualmente
                 _, prevista_str = calcular_saida_prevista(entrada_str, is_feriado)
                 
                 if prevista_str and estimada_str:
-                    # Calcula a diferença exata entre o que ele deveria fazer (Prevista) e o que ele supostamente fez (Estimada)
                     diff_mins = calcular_diferenca(prevista_str, estimada_str)
                     
                     if diff_mins > 0:
@@ -748,7 +742,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     elif diff_mins < 0:
                         total_atraso_mins += abs(diff_mins)
             
-            # APENAS 2 MÉTRICAS AGORA
             c_res1, c_res2 = st.columns(2)
             c_res1.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
             
@@ -856,7 +849,6 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     st.markdown("---")
 
     with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
-        # FORMULÁRIO SEGURO PARA EVITAR ERROS E LIMPAR CAIXA
         with st.form("form_novo_pedido", clear_on_submit=True):
             nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
             c_p1, c_p2 = st.columns([1, 2])
