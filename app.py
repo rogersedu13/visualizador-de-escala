@@ -306,6 +306,7 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
             h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
             table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }}
             table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
+            /* white-space: nowrap GARANTE QUE A PALAVRA NÃO SEJA CORTADA NA IMPRESSÃO */
             table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; white-space: nowrap; }}
             table.tabela-escala tr:last-child td {{ border-bottom: none; }}
             table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
@@ -1112,10 +1113,9 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                             
+                            # Garante que a folga fixa esteja preenchida
                             if folga_fixa_colab == dia_semana_atual:
                                 h_val = "Folga"
-                            elif h_val == "Folga" and folga_fixa_colab != "" and folga_fixa_colab != dia_semana_atual:
-                                h_val = ""
                             
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
