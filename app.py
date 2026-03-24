@@ -939,7 +939,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
             f = df_colaboradores[df_colaboradores['nome'] == colaborador]['funcao']
             if not f.empty: funcao_atual = f.iloc[0]
         
-        is_operador = (funcao_atual == "Operador(a) de Caixa")
+        is_operador = (funcao_atual in ["Operador(a) de Caixa", "Recepção"])
 
         st.markdown(f"**Editando:** `{colaborador}` ({funcao_atual})")
         
@@ -1017,6 +1017,8 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         df_filtrado = df_colaboradores.copy()
         if 'funcao' in df_filtrado.columns:
             df_filtrado = df_filtrado[df_filtrado['funcao'] == funcao_selecionada]
+            
+        mapa_folga_fixa = {row['nome']: row.get('folga_fixa', '') for _, row in df_filtrado.iterrows()}
         
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'.")
@@ -1101,6 +1103,17 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             info = dados_existentes.get((row_name, d_atual), {})
                             
                             h_val = info.get('horario', "")
+                            
+                            # --- NOVA LÓGICA: ATUALIZA FOLGA FIXA NO EXCEL ---
+                            dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
+                            folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
+                            
+                            if folga_fixa_colab == dia_semana_atual:
+                                h_val = "Folga"
+                            elif h_val == "Folga" and folga_fixa_colab != "" and folga_fixa_colab != dia_semana_atual:
+                                h_val = ""
+                            # -------------------------------------------------
+                            
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
                             
