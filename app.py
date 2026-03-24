@@ -254,7 +254,6 @@ def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: s
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
-# --- NOVAS FUNÇÕES DE PEDIDOS ---
 def salvar_pedido(nome, texto):
     try:
         supabase.table('pedidos').insert({'nome': nome, 'descricao': texto}).execute()
@@ -368,7 +367,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE", "SALINHA"])
 
-        if mins == 450: # 7:30 HRS 
+        if mins == 450: 
             if is_self: c_self_manha += 1
             elif not is_excluded_count: c_op_manha += 1
             if is_self: c_self_tarde += 1
@@ -678,6 +677,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if escala_colab.empty:
             st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
         else:
+            # FORÇA A ORDENAÇÃO PELO DIA DA SEMANA PARA NÃO FICAR EMBARALHADO
+            escala_colab = escala_colab.sort_values('data')
+            
             dados_tabela = []
             for _, row in escala_colab.iterrows():
                 data_dt = pd.to_datetime(row['data'])
@@ -687,6 +689,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 
                 intervalo, prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ("", "")
                 estimada_padrao = calcular_saida_estimada(entrada, prevista, is_domingo)
+                
+                if is_domingo and "HRS" in str(entrada):
+                    intervalo = "10 min (Só Café)"
                 
                 dados_tabela.append({
                     "Data": dia_str,
@@ -730,7 +735,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 
                 if prevista_str and estimada_str:
                     if is_feriado:
-                        # Cálculo especial para Domingo/Feriado pago por fora
                         try:
                             h_ent, m_ent = map(int, str(entrada_str).replace(" HRS", "").strip().split(':'))
                             h_est, m_est = map(int, str(estimada_str).replace("h", ":").replace("H", ":").split(':'))
@@ -741,33 +745,28 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             
                             trabalhado_bruto = mins_est - mins_ent
                             
-                            # Se for escala cheia (> 6h30m), deduz o almoço padrão. Se for escala curta, conta direto.
-                            if trabalhado_bruto > 390:
-                                int_padrao = obter_intervalo_minutos(h_ent, m_ent)
-                                trabalhado_liquido = trabalhado_bruto - int_padrao
-                            else:
-                                trabalhado_liquido = trabalhado_bruto
+                            # DESCONTA 10 MINUTOS DIRETO (CAFÉ) PRO FERIADO/DOMINGO
+                            trabalhado_liquido = trabalhado_bruto - 10
                                 
                             if trabalhado_liquido > 0:
                                 total_domingo_feriado_mins += trabalhado_liquido
                         except:
                             pass
                     else:
-                        # Dia normal, calcula pro banco de horas
                         diff_mins = calcular_diferenca(prevista_str, estimada_str)
                         if diff_mins > 0:
                             total_extra_mins += diff_mins
                         elif diff_mins < 0:
                             total_atraso_mins += abs(diff_mins)
             
-            c_res1, c_res2, c_res3, c_res4 = st.columns(4)
-            c_res1.metric("🟢 Extras Aprox. (Banco)", formatar_minutos(total_extra_mins))
-            c_res2.metric("🔴 Atrasos Aprox. (Banco)", formatar_minutos(-total_atraso_mins))
-            c_res3.metric("🔵 Feriado / Dom (Pagar)", formatar_minutos(total_domingo_feriado_mins))
+            # REMOVIDO "EXTRAS APROX" E AJUSTADO AS 3 COLUNAS
+            c_res1, c_res2, c_res3 = st.columns(3)
+            c_res1.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
+            c_res2.metric("🔵 Feriado / Dom (Pagar)", formatar_minutos(total_domingo_feriado_mins))
             
             saldo_geral = total_extra_mins - total_atraso_mins
             cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
-            c_res4.metric(f"{cor_saldo} Saldo Estimado (Banco)", formatar_minutos(saldo_geral), help="Feriado/Dom não entra neste saldo.")
+            c_res3.metric(f"{cor_saldo} Saldo Estimado", formatar_minutos(saldo_geral), help="Feriado/Dom não entra neste saldo.")
 
     st.markdown("---")
     st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
@@ -869,6 +868,7 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     st.markdown("---")
 
     with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
+        # FORMULÁRIO SEGURO PARA EVITAR ERROS E LIMPAR CAIXA
         with st.form("form_novo_pedido", clear_on_submit=True):
             nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
             c_p1, c_p2 = st.columns([1, 2])
@@ -1091,6 +1091,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     fmt_roxo     = workbook.add_format({'bg_color': '#E6E6FA', 'font_color': '#4B0082', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_cinza    = workbook.add_format({'bg_color': '#D3D3D3', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'border': 1})
                     fmt_amarelo  = workbook.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C5700', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    
                     fmt_duplicata = workbook.add_format({'bg_color': '#FF0000', 'font_color': '#FFFFFF', 'bold': True, 'align': 'center'})
 
                     ws_data = workbook.add_worksheet('Dados'); ws_data.hide()
@@ -1122,6 +1123,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             info = dados_existentes.get((row_name, d_atual), {})
                             
                             h_val = info.get('horario', "")
+                            
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                             
