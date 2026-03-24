@@ -74,7 +74,6 @@ except Exception:
 # --- Estado da Sessão ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = ""
-if "txt_pedido" not in st.session_state: st.session_state.txt_pedido = ""
 
 # --- Funções Auxiliares ---
 
@@ -307,7 +306,6 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
             h2 {{ color: #7f8c8d; font-size: 16px; margin-top: 0; margin-bottom: 25px; font-weight: normal; }}
             table.tabela-escala {{ width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }}
             table.tabela-escala th {{ background-color: #34495e; color: white; padding: 12px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
-            /* white-space: nowrap GARANTE QUE A PALAVRA NÃO SEJA CORTADA NA IMPRESSÃO */
             table.tabela-escala td {{ padding: 12px; border-bottom: 1px solid #eee; color: #333; font-size: 14px; white-space: nowrap; }}
             table.tabela-escala tr:last-child td {{ border-bottom: none; }}
             table.tabela-escala tr:nth-child(even) {{ background-color: #f9f9f9; }}
@@ -864,19 +862,22 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
     st.markdown("---")
 
     with st.expander("📬 Fazer um Pedido / Solicitação (Folgas, Trocas, etc)", expanded=False):
-        nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
-        c_p1, c_p2 = st.columns([1, 2])
-        with c_p1:
-            nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido, key="sel_nome_pedido")
-        with c_p2:
-            st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...", key="txt_pedido")
-        
-        if st.button("🚀 Enviar Pedido", type="primary"):
-            if st.session_state.txt_pedido.strip():
-                if salvar_pedido(nome_pedido, st.session_state.txt_pedido):
+        # FORMULÁRIO PARA EVITAR O ERRO DE SESSION STATE E LIMPAR A CAIXA AUTOMATICAMENTE
+        with st.form("form_novo_pedido", clear_on_submit=True):
+            nomes_para_pedido = sorted(df_colaboradores["nome"].dropna().unique())
+            c_p1, c_p2 = st.columns([1, 2])
+            with c_p1:
+                nome_pedido = st.selectbox("Seu Nome:", nomes_para_pedido)
+            with c_p2:
+                texto_pedido = st.text_area("O que você precisa?", placeholder="Ex: Preciso de folga dia 15/05 pois tenho médico...")
+            
+            btn_enviar = st.form_submit_button("🚀 Enviar Pedido", type="primary")
+            
+        if btn_enviar:
+            if texto_pedido.strip():
+                if salvar_pedido(nome_pedido, texto_pedido):
                     st.success("✅ SEU PEDIDO FOI ENVIADO COM SUCESSO! O fiscal irá analisar.")
                     st.balloons()
-                    st.session_state.txt_pedido = ""
                     time.sleep(2.5)
                     st.rerun()
             else:
@@ -1308,15 +1309,18 @@ def aba_gerenciar_pedidos():
     if not df_pedidos.empty:
         df_pedidos['created_at'] = pd.to_datetime(df_pedidos['created_at']).dt.strftime('%d/%m/%Y %H:%M')
         
-        mostrar_arquivados = st.toggle("📂 Mostrar pedidos arquivados (Concluídos)", value=False)
+        mostrar_arquivados = st.toggle("📂 Mostrar APENAS pedidos arquivados (Concluídos)", value=False)
         
         if mostrar_arquivados:
-            df_editor = df_pedidos.copy()
+            df_editor = df_pedidos[df_pedidos['status'] == 'Concluido'].copy()
         else:
             df_editor = df_pedidos[df_pedidos['status'] == 'Pendente'].copy()
             
         if df_editor.empty:
-            st.success("🎉 Nenhum pedido pendente no momento!")
+            if mostrar_arquivados:
+                st.success("📂 Nenhum pedido arquivado encontrado.")
+            else:
+                st.success("🎉 Nenhum pedido pendente no momento!")
         else:
             edited_df = st.data_editor(
                 df_editor[['id', 'created_at', 'nome', 'descricao', 'status']],
