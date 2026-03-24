@@ -575,12 +575,17 @@ def obter_intervalo_minutos(h, m):
     else:
         return 60
 
-def calcular_saida_prevista(entrada_str):
+def calcular_saida_prevista(entrada_str, is_domingo_feriado=False):
     if not entrada_str or "HRS" not in str(entrada_str): return "", ""
     try:
         time_part = str(entrada_str).replace(" HRS", "").strip()
         h, m = map(int, time_part.split(':'))
-        intervalo_mins = obter_intervalo_minutos(h, m)
+        
+        # NO DOMINGO/FERIADO SÓ TEM 10 MIN DE CAFÉ (NÃO TEM ALMOÇO PADRÃO)
+        if is_domingo_feriado:
+            intervalo_mins = 10
+        else:
+            intervalo_mins = obter_intervalo_minutos(h, m)
         
         # 7h20 de trabalho (440 minutos) + tempo de intervalo
         td_entrada = timedelta(hours=h, minutes=m)
@@ -590,7 +595,9 @@ def calcular_saida_prevista(entrada_str):
         out_h = (total_minutes // 60) % 24
         out_m = total_minutes % 60
         
-        if intervalo_mins == 15: str_int = "15 min (Só Café)"
+        if is_domingo_feriado:
+            str_int = "10 min (Só Café)"
+        elif intervalo_mins == 15: str_int = "15 min (Só Café)"
         elif intervalo_mins == 75: str_int = "1h 15m (Almoço+Café)"
         elif intervalo_mins == 90: str_int = "1h 30m"
         elif intervalo_mins == 105: str_int = "1h 45m (Almoço+Café)"
@@ -651,7 +658,7 @@ def formatar_minutos(total_mins):
 @st.fragment
 def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame):
     st.header("⏱️ Controle de Horas e Calculadora")
-    st.info("A tabela gera a Saída Estimada automaticamente para te dar uma prévia do Saldo da Semana e Horas de Feriado.")
+    st.info("A tabela gera a Saída Estimada automaticamente para te dar uma prévia do Saldo da Semana.")
     
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
@@ -687,11 +694,9 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 entrada = row['horario']
                 is_domingo = (data_dt.weekday() == 6)
                 
-                intervalo, prevista = calcular_saida_prevista(entrada) if "HRS" in str(entrada) else ("", "")
+                # A saída prevista do início é apenas visual. Será recalculada no loop de baixo com base na caixinha.
+                intervalo, prevista = calcular_saida_prevista(entrada, is_domingo) if "HRS" in str(entrada) else ("", "")
                 estimada_padrao = calcular_saida_estimada(entrada, prevista, is_domingo)
-                
-                if is_domingo and "HRS" in str(entrada):
-                    intervalo = "10 min (Só Café)"
                 
                 dados_tabela.append({
                     "Data": dia_str,
@@ -712,7 +717,7 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                     "Data": st.column_config.TextColumn("Data", disabled=True),
                     "Entrada Escala": st.column_config.TextColumn("Entrada Programada", disabled=True),
                     "Tempo Almoço/Café": st.column_config.TextColumn("Tempo Almoço/Café", disabled=True),
-                    "Saída Prevista (Cravada)": st.column_config.TextColumn("Saída Prevista", disabled=True),
+                    "Saída Prevista (Cravada)": st.column_config.TextColumn("Saída Prevista (Cravada)", disabled=True),
                     "Saída Estimada (Aprox)": st.column_config.TextColumn("Saída Estimada (Editável)"),
                     "Dom / Feriado?": st.column_config.CheckboxColumn("Dom / Feriado?")
                 },
@@ -720,53 +725,37 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                 use_container_width=True
             )
             
-            # --- CÁLCULO ---
+            # --- CÁLCULO GERAL (Tudo vai pro banco da mesma forma) ---
             total_extra_mins = 0
             total_atraso_mins = 0
-            total_domingo_feriado_mins = 0
             
             st.markdown("### 📊 Resumo da Semana")
             
             for index, row in edited_df.iterrows():
                 entrada_str = row['Entrada Escala']
-                prevista_str = row['Saída Prevista (Cravada)']
                 estimada_str = row['Saída Estimada (Aprox)']
                 is_feriado = row['Dom / Feriado?']
                 
+                # Recalcula a prevista caso a pessoa marque o feriado manualmente
+                _, prevista_str = calcular_saida_prevista(entrada_str, is_feriado)
+                
                 if prevista_str and estimada_str:
-                    if is_feriado:
-                        try:
-                            h_ent, m_ent = map(int, str(entrada_str).replace(" HRS", "").strip().split(':'))
-                            h_est, m_est = map(int, str(estimada_str).replace("h", ":").replace("H", ":").split(':'))
-                            mins_ent = h_ent * 60 + m_ent
-                            mins_est = h_est * 60 + m_est
-                            
-                            if mins_est < mins_ent and mins_ent > 1200: mins_est += 24 * 60
-                            
-                            trabalhado_bruto = mins_est - mins_ent
-                            
-                            # DESCONTA 10 MINUTOS DIRETO (CAFÉ) PRO FERIADO/DOMINGO
-                            trabalhado_liquido = trabalhado_bruto - 10
-                                
-                            if trabalhado_liquido > 0:
-                                total_domingo_feriado_mins += trabalhado_liquido
-                        except:
-                            pass
-                    else:
-                        diff_mins = calcular_diferenca(prevista_str, estimada_str)
-                        if diff_mins > 0:
-                            total_extra_mins += diff_mins
-                        elif diff_mins < 0:
-                            total_atraso_mins += abs(diff_mins)
+                    # Calcula a diferença exata entre o que ele deveria fazer (Prevista) e o que ele supostamente fez (Estimada)
+                    diff_mins = calcular_diferenca(prevista_str, estimada_str)
+                    
+                    if diff_mins > 0:
+                        total_extra_mins += diff_mins
+                    elif diff_mins < 0:
+                        total_atraso_mins += abs(diff_mins)
             
-            # REMOVIDO "EXTRAS APROX" E AJUSTADO AS 3 COLUNAS
+            # APENAS 3 MÉTRICAS COMO SOLICITADO
             c_res1, c_res2, c_res3 = st.columns(3)
-            c_res1.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
-            c_res2.metric("🔵 Feriado / Dom (Pagar)", formatar_minutos(total_domingo_feriado_mins))
+            c_res1.metric("🟢 Extras Aprox.", formatar_minutos(total_extra_mins))
+            c_res2.metric("🔴 Atrasos Aprox.", formatar_minutos(-total_atraso_mins))
             
             saldo_geral = total_extra_mins - total_atraso_mins
             cor_saldo = "🟢" if saldo_geral >= 0 else "🔴"
-            c_res3.metric(f"{cor_saldo} Saldo Estimado", formatar_minutos(saldo_geral), help="Feriado/Dom não entra neste saldo.")
+            c_res3.metric(f"{cor_saldo} Saldo Estimado", formatar_minutos(saldo_geral))
 
     st.markdown("---")
     st.markdown("### 🧮 Calculadora Avulsa de Horas (Base: 7h20m)")
