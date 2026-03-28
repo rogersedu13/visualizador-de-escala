@@ -82,7 +82,6 @@ def formatar_data_completa(data_timestamp: pd.Timestamp) -> str:
     return data_timestamp.strftime(f'%d/%m/%Y ({DIAS_SEMANA_PT[data_timestamp.weekday()]})')
 
 def formatar_lista_folgas_multilinha(lista_nomes, step=2):
-    """Quebra a lista de nomes em várias linhas a cada 'step' nomes."""
     if not lista_nomes: return ""
     sorted_nomes = sorted([n for n in lista_nomes if n])
     chunks = [sorted_nomes[i:i + step] for i in range(0, len(sorted_nomes), step)]
@@ -562,15 +561,15 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
     </html>
     """
 
-# --- FUNÇÕES DE CONTROLE DE HORAS ---
+# --- FUNÇÕES DE CONTROLE DE HORAS E AVISOS ---
 
 def obter_intervalo_minutos(h, m):
     mins = h * 60 + m
-    if mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
-        return 105 # 1h30 almoço + 15m café
-    elif mins == 660 or mins == 720: # 11:00 (660) ou 12:00 (720)
-        return 75 # 1h almoço + 15m café
-    elif mins >= 870: # 14:30 em diante
+    if mins == 570 or mins == 600: 
+        return 105 
+    elif mins == 660 or mins == 720: 
+        return 75 
+    elif mins >= 870: 
         return 15
     else:
         return 60
@@ -613,14 +612,14 @@ def calcular_saida_estimada(entrada_str, prevista_str, is_domingo_feriado):
         mins = h * 60 + m
         
         if is_domingo_feriado:
-            if mins == 410: return "12:50" # 6:50
-            if mins == 450: return "13:10" # 7:30
-            if mins == 480: return "13:30" # 8:00
+            if mins == 410: return "12:50" 
+            if mins == 450: return "13:10" 
+            if mins == 480: return "13:30" 
             return prevista_str
         else:
-            if mins == 570 or mins == 600: # 9:30 or 10:00
+            if mins == 570 or mins == 600: 
                 return "19:05"
-            elif mins >= 660: # 11:00 em diante
+            elif mins >= 660: 
                 return "20:45"
             else:
                 return prevista_str
@@ -636,7 +635,6 @@ def calcular_diferenca(prevista_str, estimada_str):
         mins_prev = ph * 60 + pm
         mins_est = eh * 60 + em
         
-        # Correção da virada da noite (só aplica se sair de madrugada e deveria sair tarde da noite)
         if mins_est < mins_prev and mins_prev > 1200 and mins_est < 480: 
             mins_est += 24 * 60
             
@@ -651,6 +649,82 @@ def formatar_minutos(total_mins):
     h = total_mins // 60
     m = total_mins % 60
     return f"{sign} {h:02d}h {m:02d}m"
+
+# NOVA FUNÇÃO: ALERTAS TRABALHISTAS (CLT)
+def gerar_alertas_trabalhistas(nome, horarios, data_inicio):
+    alertas = []
+    if len(horarios) < 7: return alertas
+    
+    # 1. Alerta de 7 dias diretos sem folga
+    dias_trabalho = sum(1 for h in horarios if h and "HRS" in h)
+    if dias_trabalho == 7:
+        alertas.append("⚠️ **Sem Folga Semanal:** Escalado(a) os 7 dias seguidos.")
+
+    # 2. Alerta de Interjornada (Mínimo de 11h de descanso)
+    for i in range(6):
+        h1 = horarios[i]
+        h2 = horarios[i+1]
+        
+        if h1 and "HRS" in h1 and h2 and "HRS" in h2:
+            data1 = data_inicio + timedelta(days=i)
+            data2 = data_inicio + timedelta(days=i+1)
+            is_domingo1 = (data1.weekday() == 6)
+            
+            _, prev1 = calcular_saida_prevista(h1, is_domingo1)
+            saida1 = calcular_saida_estimada(h1, prev1, is_domingo1)
+            ent2 = h2.replace(" HRS", "").strip()
+            
+            if saida1 and ent2:
+                try:
+                    s_h, s_m = map(int, saida1.replace("h",":").replace("H",":").split(':'))
+                    e_h, e_m = map(int, ent2.split(':'))
+                    
+                    dt1 = datetime.datetime.combine(data1, datetime.time(s_h, s_m))
+                    h1_int = int(h1.replace(" HRS","").split(":")[0])
+                    
+                    if s_h < 12 and h1_int >= 12: 
+                        dt1 += timedelta(days=1)
+                        
+                    dt2 = datetime.datetime.combine(data2, datetime.time(e_h, e_m))
+                    diff_hours = (dt2 - dt1).total_seconds() / 3600.0
+                    
+                    if diff_hours < 11:
+                        dia1_str = DIAS_SEMANA_PT[data1.weekday()][:3]
+                        dia2_str = DIAS_SEMANA_PT[data2.weekday()][:3]
+                        h_fmt = int(diff_hours)
+                        m_fmt = int(round((diff_hours - h_fmt) * 60))
+                        alertas.append(f"⚠️ **Interjornada Curta:** Apenas {h_fmt}h {m_fmt}m de descanso entre {dia1_str} e {dia2_str} (A lei exige 11h).")
+                except:
+                    pass
+                    
+    return alertas
+
+def exibir_painel_alertas(df_semanas_ativas, df_colaboradores):
+    if df_semanas_ativas.empty or df_colaboradores.empty: return
+    
+    semana_recente = df_semanas_ativas.iloc[0]
+    id_semana = semana_recente['id']
+    data_ini = pd.to_datetime(semana_recente['data_inicio']).date()
+    nome_semana = semana_recente['nome_semana']
+    
+    df_escala = carregar_escala_semana_por_id(id_semana)
+    if df_escala.empty: return
+    
+    alertas_gerais = []
+    
+    for nome in df_colaboradores['nome']:
+        escala_colab = df_escala[df_escala['nome'] == nome].sort_values('data')
+        if len(escala_colab) == 7:
+            horarios = escala_colab['horario'].tolist()
+            alertas_colab = gerar_alertas_trabalhistas(nome, horarios, data_ini)
+            for alerta in alertas_colab:
+                # Formatando para o painel global
+                alerta_limpo = alerta.replace('⚠️ ', '')
+                alertas_gerais.append(f"**{nome}** ➔ {alerta_limpo}")
+                
+    if alertas_gerais:
+        st.error(f"### 🚨 Alertas Trabalhistas Pendentes ({nome_semana})\n" + "\n".join(["* " + a for a in alertas_gerais]))
+
 
 # --- ABAS ---
 
@@ -992,6 +1066,12 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
                 novos_caixas.append(val_c)
         
         st.markdown("")
+        
+        # CHAMA OS ALERTAS TRABALHISTAS NA TELA
+        alertas_clt = gerar_alertas_trabalhistas(colaborador, novos_horarios, data_ini)
+        if alertas_clt:
+            st.error("**🚨 Alertas Trabalhistas (CLT):**\n\n" + "\n\n".join(alertas_clt))
+            
         if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             if salvar_escala_individual(colaborador, novos_horarios, novos_caixas, data_ini, id_semana):
                 st.cache_data.clear() 
@@ -1461,6 +1541,9 @@ def main():
         st.markdown("---"); st.caption("DEV @Rogério Souza")
 
     if st.session_state.logado:
+        # --- PAINEL DE ALERTAS GERAIS ---
+        exibir_painel_alertas(df_semanas_ativas, df_colaboradores)
+        
         t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["🗓️ Gerenciar Semanas", "✏️ Editar Manual", "🖨️ Escala Diária", "📌 Pedidos", "⏱️ Controle Horas", "📤 Importar / Baixar", "👥 Colaboradores", "👁️ Visão Geral"])
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
