@@ -119,7 +119,8 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 @st.cache_data(ttl=10)
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
-        params = {'p_semana_id': id_semana}
+        # CORREÇÃO DO ERRO INT64: convertendo id_semana explicitamente para int padrão do Python
+        params = {'p_semana_id': int(id_semana)}
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
@@ -153,7 +154,7 @@ def salvar_escala_individual(nome: str, horarios: list, caixas: list, data_inici
                 'p_data': data_dia.strftime('%Y-%m-%d'), 
                 'p_horario': horario, 
                 'p_caixa': cx, 
-                'p_semana_id': id_semana
+                'p_semana_id': int(id_semana)
             }).execute()
         return True
     except Exception as e: st.error(f"Erro ao salvar: {e}"); return False
@@ -194,7 +195,7 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
                     caixa = None
                 
                 data_banco = (data_inicio_semana + timedelta(days=i)).strftime('%Y-%m-%d')
-                supabase.rpc('save_escala_dia_final', {'p_nome': nome_limpo, 'p_data': data_banco, 'p_horario': horario, 'p_caixa': caixa, 'p_semana_id': id_semana}).execute()
+                supabase.rpc('save_escala_dia_final', {'p_nome': nome_limpo, 'p_data': data_banco, 'p_horario': horario, 'p_caixa': caixa, 'p_semana_id': int(id_semana)}).execute()
             if index % 5 == 0: barra.progress((index + 1) / total_linhas, text=f"Importando linha {index+1}...")
         barra.empty()
         return True
@@ -205,7 +206,7 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
         supabase.rpc('inicializar_escala_semanal', {'p_data_inicio': data_inicio.strftime('%Y-%m-%d')}).execute()
         res = supabase.table('semanas').select('id').eq('data_inicio', data_inicio.strftime('%Y-%m-%d')).execute()
         if not res.data: return False
-        new_id = res.data[0]['id']
+        new_id = int(res.data[0]['id'])
         df_colabs = carregar_colaboradores()
         
         if not df_colabs.empty:
@@ -232,7 +233,7 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
 def arquivar_reativar_semana(id_semana: int, novo_status: bool):
     try:
         func = 'reativar_semana' if novo_status else 'arquivar_semana'
-        supabase.rpc(func, {'p_semana_id': id_semana}).execute()
+        supabase.rpc(func, {'p_semana_id': int(id_semana)}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -270,7 +271,7 @@ def carregar_pedidos():
 
 def atualizar_status_pedido(id_pedido, novo_status):
     try:
-        supabase.table('pedidos').update({'status': novo_status}).eq('id', id_pedido).execute()
+        supabase.table('pedidos').update({'status': novo_status}).eq('id', int(id_pedido)).execute()
         return True
     except Exception as e:
         st.error(f"Erro ao atualizar: {e}")
@@ -565,11 +566,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
 def obter_intervalo_minutos(h, m):
     mins = h * 60 + m
-    if mins == 570 or mins == 600: 
-        return 105 
-    elif mins == 660 or mins == 720: 
-        return 75 
-    elif mins >= 870: 
+    if mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
+        return 105 # 1h30 almoço + 15m café
+    elif mins == 660 or mins == 720: # 11:00 (660) ou 12:00 (720)
+        return 75 # 1h almoço + 15m café
+    elif mins >= 870: # 14:30 em diante
         return 15
     else:
         return 60
@@ -612,14 +613,14 @@ def calcular_saida_estimada(entrada_str, prevista_str, is_domingo_feriado):
         mins = h * 60 + m
         
         if is_domingo_feriado:
-            if mins == 410: return "12:50" 
-            if mins == 450: return "13:10" 
-            if mins == 480: return "13:30" 
+            if mins == 410: return "12:50" # 6:50
+            if mins == 450: return "13:10" # 7:30
+            if mins == 480: return "13:30" # 8:00
             return prevista_str
         else:
-            if mins == 570 or mins == 600: 
+            if mins == 570 or mins == 600: # 9:30 or 10:00
                 return "19:05"
-            elif mins >= 660: 
+            elif mins >= 660: # 11:00 em diante
                 return "20:45"
             else:
                 return prevista_str
@@ -703,7 +704,7 @@ def exibir_painel_alertas(df_semanas_ativas, df_colaboradores):
     if df_semanas_ativas.empty or df_colaboradores.empty: return
     
     semana_recente = df_semanas_ativas.iloc[0]
-    id_semana = semana_recente['id']
+    id_semana = int(semana_recente['id'])
     data_ini = pd.to_datetime(semana_recente['data_inicio']).date()
     nome_semana = semana_recente['nome_semana']
     
@@ -718,7 +719,6 @@ def exibir_painel_alertas(df_semanas_ativas, df_colaboradores):
             horarios = escala_colab['horario'].tolist()
             alertas_colab = gerar_alertas_trabalhistas(nome, horarios, data_ini)
             for alerta in alertas_colab:
-                # Formatando para o painel global
                 alerta_limpo = alerta.replace('⚠️ ', '')
                 alertas_gerais.append(f"**{nome}** ➔ {alerta_limpo}")
                 
@@ -740,7 +740,7 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
     
     c1, c2 = st.columns(2)
     with c1:
-        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        opcoes = {row['nome_semana']: {'id': int(row['id']), 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
         semana_str = st.selectbox("1. Selecione a semana:", options=opcoes.keys(), key="sel_sem_horas")
         semana_info = opcoes[semana_str]
     with c2:
@@ -757,6 +757,8 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if escala_colab.empty:
             st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
         else:
+            # FORÇANDO A DATA A SER DATETIME ANTES DO SORT PARA CORRIGIR EMBARALHAMENTO
+            escala_colab['data'] = pd.to_datetime(escala_colab['data'])
             escala_colab = escala_colab.sort_values('data')
             
             dados_tabela = []
@@ -890,7 +892,7 @@ def aba_consultar_escala_publica(df_colaboradores: pd.DataFrame, df_semanas_ativ
             if not f.empty and f.iloc[0] == "Operador(a) de Caixa": is_operador = True
 
         if df_semanas_ativas.empty: st.info("Nenhuma semana disponível."); return
-        opcoes_semana = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
+        opcoes_semana = {row['nome_semana']: {'id': int(row['id']), 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for index, row in df_semanas_ativas.iterrows()}
         semana_str = st.selectbox("2. Selecione a semana:", options=opcoes_semana.keys())
 
         if semana_str:
@@ -976,10 +978,10 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
             key_arch = f"btn_arch_{row['id']}"
             if row['ativa']:
                 if c2.button("Arquivar", key=key_arch):
-                    arquivar_reativar_semana(row['id'], False); st.cache_data.clear(); st.rerun()
+                    arquivar_reativar_semana(int(row['id']), False); st.cache_data.clear(); st.rerun()
             else:
                 if c2.button("Reativar", key=key_arch):
-                    arquivar_reativar_semana(row['id'], True); st.cache_data.clear(); st.rerun()
+                    arquivar_reativar_semana(int(row['id']), True); st.cache_data.clear(); st.rerun()
     else: 
         st.info("Nenhuma semana criada.")
 
@@ -996,7 +998,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
 
     c1, c2 = st.columns(2)
     with c1:
-        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        opcoes = {row['nome_semana']: {'id': int(row['id']), 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
         semana_str = st.selectbox("Selecione a semana:", options=opcoes.keys())
         semana_info = opcoes[semana_str]
     with c2:
@@ -1067,7 +1069,6 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
         
         st.markdown("")
         
-        # CHAMA OS ALERTAS TRABALHISTAS NA TELA
         alertas_clt = gerar_alertas_trabalhistas(colaborador, novos_horarios, data_ini)
         if alertas_clt:
             st.error("**🚨 Alertas Trabalhistas (CLT):**\n\n" + "\n\n".join(alertas_clt))
@@ -1088,7 +1089,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
     with col1:
         funcao_selecionada = st.selectbox("1. Qual função?", FUNCOES_LOJA, key="sel_func_down")
     with col2:
-        opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+        opcoes = {row['nome_semana']: {'id': int(row['id']), 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
         semana_str = st.selectbox("2. Qual semana?", options=opcoes.keys(), key="sel_sem_imp")
         semana_info = opcoes[semana_str]
     
@@ -1440,7 +1441,7 @@ def aba_escala_diaria_impressao(df_colaboradores: pd.DataFrame, df_semanas_ativa
     if df_semanas_ativas.empty: st.warning("Nenhuma semana ativa."); return
     if df_colaboradores.empty: st.warning("Nenhum colaborador."); return
 
-    opcoes = {row['nome_semana']: {'id': row['id'], 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
+    opcoes = {row['nome_semana']: {'id': int(row['id']), 'data_inicio': pd.to_datetime(row['data_inicio']).date()} for _, row in df_semanas_ativas.iterrows()}
     semana_str = st.selectbox("1. Selecione a Semana:", options=opcoes.keys())
     semana_info = opcoes[semana_str]
     id_semana = semana_info['id']
