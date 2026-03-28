@@ -94,7 +94,6 @@ def carregar_colaboradores() -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
-            
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
             if 'nome_social' not in df.columns: df['nome_social'] = None
             if 'folga_fixa' not in df.columns: df['folga_fixa'] = None
@@ -119,7 +118,6 @@ def carregar_indice_semanas(apenas_ativas: bool = False) -> pd.DataFrame:
 @st.cache_data(ttl=10)
 def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
     try:
-        # CORREÇÃO DO ERRO INT64: convertendo id_semana explicitamente para int padrão do Python
         params = {'p_semana_id': int(id_semana)}
         response = supabase.rpc('get_escala_semana', params).execute()
         df = pd.DataFrame(response.data)
@@ -321,7 +319,6 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     """
 
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_tema):
-    
     lista_op_folga = []
     lista_emp_folga = []
     status_invisivel = ["Ferias", "Afastado(a)", "Atestado", "", None]
@@ -346,7 +343,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
     for _, row in df_ops_sorted.iterrows():
         horario = str(row['horario'])
-        
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -355,7 +351,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             nome = str(row['nome']).upper()
             
         cx = str(row.get('numero_caixa', '')).replace('.0', '')
-        
         if horario in status_invisivel or horario == "nan": continue
         if "Folga" in horario:
             lista_op_folga.append(nome)
@@ -363,7 +358,6 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
-        
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE", "SALINHA"])
 
@@ -381,20 +375,11 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 elif not is_excluded_count: c_op_tarde += 1
 
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
-        
-        flat_ops_data.append({
-            'cx': cx, 
-            'nome': nome, 
-            'h_clean': h_clean, 
-            'mins': mins, 
-            'rank': row['rank_cx'],
-            'has_separator': False
-        })
+        flat_ops_data.append({ 'cx': cx, 'nome': nome, 'h_clean': h_clean, 'mins': mins, 'rank': row['rank_cx'], 'has_separator': False })
 
     df_emp_sorted = df_emp_dia.sort_values(by='nome')
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
-        
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -415,50 +400,36 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         if mins >= 570: c_emp_tarde += 1
         
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
-        
         nome_display = nome
         if tarefa and tarefa != "nan" and tarefa != "":
             nome_display = f"{nome} <span style='font-size:0.85em'>({tarefa})</span>"
             
-        flat_emp_data.append({
-            'nome': nome_display, 
-            'h_clean': h_clean, 
-            'mins': mins,
-            'has_separator': False
-        })
+        flat_emp_data.append({ 'nome': nome_display, 'h_clean': h_clean, 'mins': mins, 'has_separator': False })
 
     flat_ops_data.sort(key=lambda x: (x['mins'], -x['rank']))
     flat_emp_data.sort(key=lambda x: (x['mins'], x['nome']))
 
     for i in range(len(flat_ops_data) - 1):
-        if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']:
-            flat_ops_data[i]['has_separator'] = True
-    
+        if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']: flat_ops_data[i]['has_separator'] = True
     for i in range(len(flat_emp_data) - 1):
-        if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']:
-            flat_emp_data[i]['has_separator'] = True
+        if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']: flat_emp_data[i]['has_separator'] = True
 
     final_emp_list = []
     for emp in flat_emp_data:
         final_emp_list.append(emp)
-        if emp.get('has_separator'):
-            final_emp_list.append(None) 
+        if emp.get('has_separator'): final_emp_list.append(None) 
             
     rows_html = ""
     for op, emp in zip_longest(flat_ops_data, final_emp_list, fillvalue=None):
         op_html = ""
         op_class_extra = " separator-bottom" if (op and op['has_separator']) else ""
-        if op:
-            op_html = f"<td class='cx-col{op_class_extra}'>{op['cx']}</td><td class='nome-col{op_class_extra}'>{op['nome']}</td><td class='horario-col{op_class_extra}'>{op['h_clean']}</td>"
-        else:
-            op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
+        if op: op_html = f"<td class='cx-col{op_class_extra}'>{op['cx']}</td><td class='nome-col{op_class_extra}'>{op['nome']}</td><td class='horario-col{op_class_extra}'>{op['h_clean']}</td>"
+        else: op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
         
         emp_html = ""
         emp_class_extra = " separator-bottom" if (emp and emp.get('has_separator')) else ""
-        if emp:
-            emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
-        else:
-            emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
+        if emp: emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
+        else: emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
             
         rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
 
@@ -467,16 +438,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
     tot_op_m = c_op_manha + c_self_manha
     tot_op_t = c_op_tarde + c_self_tarde
-    
-    resumo_op = f"""
-    MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>
-    TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES
-    """
-    
-    resumo_emp = f"""
-    MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>
-    TARDE: {c_emp_tarde:02d} EMPACOTADORES
-    """
+    resumo_op = f"MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES"
+    resumo_emp = f"MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>TARDE: {c_emp_tarde:02d} EMPACOTADORES"
 
     return f"""
     <!DOCTYPE html>
@@ -566,14 +529,10 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
 def obter_intervalo_minutos(h, m):
     mins = h * 60 + m
-    if mins == 570 or mins == 600: # 09:30 (570) ou 10:00 (600)
-        return 105 # 1h30 almoço + 15m café
-    elif mins == 660 or mins == 720: # 11:00 (660) ou 12:00 (720)
-        return 75 # 1h almoço + 15m café
-    elif mins >= 870: # 14:30 em diante
-        return 15
-    else:
-        return 60
+    if mins == 570 or mins == 600: return 105 
+    elif mins == 660 or mins == 720: return 75 
+    elif mins >= 870: return 15
+    else: return 60
 
 def calcular_saida_prevista(entrada_str, is_domingo_feriado=False):
     if not entrada_str or "HRS" not in str(entrada_str): return "", ""
@@ -581,10 +540,8 @@ def calcular_saida_prevista(entrada_str, is_domingo_feriado=False):
         time_part = str(entrada_str).replace(" HRS", "").strip()
         h, m = map(int, time_part.split(':'))
         
-        if is_domingo_feriado:
-            intervalo_mins = 10
-        else:
-            intervalo_mins = obter_intervalo_minutos(h, m)
+        if is_domingo_feriado: intervalo_mins = 10
+        else: intervalo_mins = obter_intervalo_minutos(h, m)
         
         td_entrada = timedelta(hours=h, minutes=m)
         td_saida = td_entrada + timedelta(minutes=(440 + intervalo_mins))
@@ -593,8 +550,7 @@ def calcular_saida_prevista(entrada_str, is_domingo_feriado=False):
         out_h = (total_minutes // 60) % 24
         out_m = total_minutes % 60
         
-        if is_domingo_feriado:
-            str_int = "10 min (Só Café)"
+        if is_domingo_feriado: str_int = "10 min (Só Café)"
         elif intervalo_mins == 15: str_int = "15 min (Só Café)"
         elif intervalo_mins == 75: str_int = "1h 15m (Almoço+Café)"
         elif intervalo_mins == 90: str_int = "1h 30m"
@@ -613,17 +569,14 @@ def calcular_saida_estimada(entrada_str, prevista_str, is_domingo_feriado):
         mins = h * 60 + m
         
         if is_domingo_feriado:
-            if mins == 410: return "12:50" # 6:50
-            if mins == 450: return "13:10" # 7:30
-            if mins == 480: return "13:30" # 8:00
+            if mins == 410: return "12:50" 
+            if mins == 450: return "13:10" 
+            if mins == 480: return "13:30" 
             return prevista_str
         else:
-            if mins == 570 or mins == 600: # 9:30 or 10:00
-                return "19:05"
-            elif mins >= 660: # 11:00 em diante
-                return "20:45"
-            else:
-                return prevista_str
+            if mins == 570 or mins == 600: return "19:05"
+            elif mins >= 660: return "20:45"
+            else: return prevista_str
     except:
         return prevista_str
 
@@ -656,12 +609,10 @@ def gerar_alertas_trabalhistas(nome, horarios, data_inicio):
     alertas = []
     if len(horarios) < 7: return alertas
     
-    # 1. Alerta de 7 dias diretos sem folga
     dias_trabalho = sum(1 for h in horarios if h and "HRS" in h)
     if dias_trabalho == 7:
         alertas.append("⚠️ **Sem Folga Semanal:** Escalado(a) os 7 dias seguidos.")
 
-    # 2. Alerta de Interjornada (Mínimo de 11h de descanso)
     for i in range(6):
         h1 = horarios[i]
         h2 = horarios[i+1]
@@ -690,11 +641,13 @@ def gerar_alertas_trabalhistas(nome, horarios, data_inicio):
                     diff_hours = (dt2 - dt1).total_seconds() / 3600.0
                     
                     if diff_hours < 11:
-                        dia1_str = DIAS_SEMANA_PT[data1.weekday()][:3]
-                        dia2_str = DIAS_SEMANA_PT[data2.weekday()][:3]
+                        # AGORA COM A DATA (DD/MM) INCLUSA E SEM O AVISO DA LEI
+                        dia1_str = f"{DIAS_SEMANA_PT[data1.weekday()][:3]} ({data1.strftime('%d/%m')})"
+                        dia2_str = f"{DIAS_SEMANA_PT[data2.weekday()][:3]} ({data2.strftime('%d/%m')})"
                         h_fmt = int(diff_hours)
                         m_fmt = int(round((diff_hours - h_fmt) * 60))
-                        alertas.append(f"⚠️ **Interjornada Curta:** Apenas {h_fmt}h {m_fmt}m de descanso entre {dia1_str} e {dia2_str} (A lei exige 11h).")
+                        
+                        alertas.append(f"⚠️ **Interjornada Curta:** Apenas {h_fmt}h {m_fmt}m de descanso entre {dia1_str} e {dia2_str}.")
                 except:
                     pass
                     
@@ -757,7 +710,6 @@ def aba_controle_horas(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
         if escala_colab.empty:
             st.info("Nenhum horário cadastrado para este colaborador nesta semana.")
         else:
-            # FORÇANDO A DATA A SER DATETIME ANTES DO SORT PARA CORRIGIR EMBARALHAMENTO
             escala_colab['data'] = pd.to_datetime(escala_colab['data'])
             escala_colab = escala_colab.sort_values('data')
             
