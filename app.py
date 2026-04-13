@@ -995,7 +995,7 @@ def aba_editar_escala_individual(df_colaboradores: pd.DataFrame, df_semanas_ativ
 @st.fragment
 def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.DataFrame, df_semanas_todas: pd.DataFrame):
     st.header("✨ Escala Mágica")
-    st.markdown("Automatize a criação da sua escala sem afetar a rotina normal do sistema. **Siga os dois passos abaixo:**")
+    st.markdown("**Siga os dois passos abaixo:**")
     
     if df_semanas_ativas.empty: st.warning("Crie ou ative uma semana primeiro na aba 'Gerar Semanas'."); return
     
@@ -1104,15 +1104,13 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         c_val = str(row.get(cx_col, ""))
                         if c_val == "nan": c_val = ""
                         
-                        # APLICAÇÃO DA REGRA: DOMINGOS 1X1
                         if dt.weekday() == 6 and h_val.strip() == "":
                             trab_passado = trabalhou_na_data(nome, dt - timedelta(days=7), df_semanas_todas)
                             if trab_passado: h_val = "Folga"
-                            else: h_val = random.choice(["8:00 HRS", "12:00 HRS"]) # Assumindo a vaga
+                            else: h_val = random.choice(["8:00 HRS", "12:00 HRS"]) 
                                 
                         dados_existentes[(nome, dt)] = {'horario': h_val, 'caixa': c_val}
                         
-                # DISTRIBUIÇÃO DOS CAIXAS POR DIA
                 for col_data in datas_cols:
                     dt = datetime.datetime.strptime(col_data, "%d/%m/%Y").date()
                     dia_items = []
@@ -1126,7 +1124,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         if (nome, dt) in dados_existentes:
                             dados_existentes[(nome, dt)]['caixa'] = alocacao.get(nome, "")
                             
-                # GERAÇÃO DO NOVO EXCEL FINALIZADO
                 colunas_f = ['Nome']
                 for i in range(7):
                     d_str_f = (data_ini_up + timedelta(days=i)).strftime('%d/%m/%Y')
