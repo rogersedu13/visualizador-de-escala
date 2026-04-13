@@ -97,9 +97,12 @@ def carregar_colaboradores() -> pd.DataFrame:
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
             if 'nome_social' not in df.columns: df['nome_social'] = None
             if 'folga_fixa' not in df.columns: df['folga_fixa'] = None
+            if 'status' not in df.columns: df['status'] = 'Ativo' # Novo campo de Status
+            
             df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
             df['nome_social'] = df['nome_social'].fillna('')
             df['folga_fixa'] = df['folga_fixa'].fillna('')
+            df['status'] = df['status'].fillna('Ativo')
         return df
     except Exception as e: 
         return pd.DataFrame()
@@ -129,10 +132,13 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
                 cols_to_merge = ['nome', 'funcao']
                 if 'nome_social' in df_colabs.columns: cols_to_merge.append('nome_social')
+                if 'status' in df_colabs.columns: cols_to_merge.append('status')
+                
                 df_colabs_unique = df_colabs.drop_duplicates(subset=['nome'])
                 df = df.merge(df_colabs_unique[cols_to_merge], on='nome', how='left')
                 df['funcao'] = df['funcao'].fillna('Operador(a) de Caixa')
                 if 'nome_social' in df.columns: df['nome_social'] = df['nome_social'].fillna('')
+                if 'status' in df.columns: df['status'] = df['status'].fillna('Ativo')
         return df
     except Exception as e: st.error(f"Erro ao carregar escala: {e}"); return pd.DataFrame()
 
@@ -154,13 +160,16 @@ def salvar_escala_via_excel(df_excel: pd.DataFrame, data_inicio_semana: date, id
         total_linhas = len(df_excel)
         for index, row in df_excel.iterrows():
             nome = row.get('Nome')
-            if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome) or "Manhã" in str(nome) or "Tarde" in str(nome): continue
+            if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome).upper() or "MANH" in str(nome).upper() or "TARDE" in str(nome).upper() or "OPERADOR" in str(nome).upper(): continue
             nome_limpo = str(nome).strip()
             if nome_limpo not in nomes_banco:
                 try:
-                    supabase.table('colaboradores').insert({'nome': nome_limpo, 'funcao': 'Operador(a) de Caixa'}).execute()
+                    supabase.table('colaboradores').insert({'nome': nome_limpo, 'funcao': 'Operador(a) de Caixa', 'status': 'Ativo'}).execute()
                     nomes_banco.add(nome_limpo)
-                except: pass
+                except: 
+                    # Tenta inserir sem status caso a coluna não exista no banco
+                    try: supabase.table('colaboradores').insert({'nome': nome_limpo, 'funcao': 'Operador(a) de Caixa'}).execute()
+                    except: pass
             for i in range(7):
                 data_str_header = datas_reais[i]
                 horario = ""
@@ -194,10 +203,20 @@ def inicializar_semana_simples(data_inicio: date) -> bool:
             for index, row in df_colabs.iterrows():
                 nome = row['nome']
                 folga_fixa = row.get('folga_fixa', '')
+                status_atual = row.get('status', 'Ativo')
+                
                 for i in range(7):
                     d = data_inicio + timedelta(days=i)
                     dia_semana_nome = DIAS_SEMANA_PT[d.weekday()]
-                    horario_padrao = "Folga" if folga_fixa == dia_semana_nome else ""
+                    
+                    # Se estiver afastado/férias/atestado, preenche a semana toda com isso. Senão, olha a folga fixa.
+                    if status_atual in ["Ferias", "Afastado(a)", "Atestado"]:
+                        horario_padrao = status_atual
+                    elif folga_fixa == dia_semana_nome:
+                        horario_padrao = "Folga"
+                    else:
+                        horario_padrao = ""
+                        
                     supabase.rpc('save_escala_dia_final', {'p_nome': nome, 'p_data': d.strftime('%Y-%m-%d'), 'p_horario': horario_padrao, 'p_caixa': None, 'p_semana_id': new_id}).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
@@ -211,7 +230,11 @@ def arquivar_reativar_semana(id_semana: int, novo_status: bool):
 
 def adicionar_colaborador(nome: str, funcao: str) -> bool:
     try:
-        supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao}).execute()
+        try:
+            supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao, 'status': 'Ativo'}).execute()
+        except:
+            # Fallback se a coluna status ainda não tiver sido criada
+            supabase.table('colaboradores').insert({'nome': nome.strip(), 'funcao': funcao}).execute()
         return True
     except Exception as e: st.error(f"Erro ao adicionar: {e}"); return False
 
@@ -220,9 +243,13 @@ def remover_colaboradores(lista_nomes: list) -> bool:
         supabase.rpc('delete_colaboradores', {'p_nomes': [n.strip() for n in lista_nomes]}).execute(); return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
-def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str, nova_folga: str):
+def atualizar_dados_colaborador(nome: str, nova_funcao: str, novo_nome_social: str, nova_folga: str, novo_status: str):
     try:
-        supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social, 'folga_fixa': nova_folga}).eq('nome', nome).execute()
+        try:
+            supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social, 'folga_fixa': nova_folga, 'status': novo_status}).eq('nome', nome).execute()
+        except:
+            st.error("⚠️ Você ainda não criou a coluna 'status' (texto) na tabela 'colaboradores' no Supabase! Atualizando os outros dados apenas.")
+            supabase.table('colaboradores').update({'funcao': nova_funcao, 'nome_social': novo_nome_social, 'folga_fixa': nova_folga}).eq('nome', nome).execute()
         return True
     except Exception as e: st.error(f"Erro: {e}"); return False
 
@@ -256,16 +283,22 @@ def carregar_fiscais() -> pd.DataFrame:
 
 # --- FUNÇÃO DE ALOCAÇÃO AUTOMÁTICA DE HORÁRIOS (RODÍZIO) ---
 def gerar_alocacao_semanal(df_colabs_op, data_ini_atual, df_semanas_todas):
-    n_total = len(df_colabs_op)
+    # Ignora quem está de Férias/Atestado/Afastado para não roubar as vagas da escala
+    df_ativos = df_colabs_op[~df_colabs_op['status'].isin(['Ferias', 'Afastado(a)', 'Atestado'])]
+    n_total = len(df_ativos)
+    
     if n_total == 0: return {}
     vagas_650 = int(n_total * 0.35)
     vagas_1200 = int(n_total * 0.45)
     vagas_1000 = n_total - vagas_650 - vagas_1200 
     vagas_disponiveis = {"6:50 HRS": vagas_650, "10:00 HRS": vagas_1000, "12:00 HRS": vagas_1200}
+    
     data_menos_7 = (data_ini_atual - timedelta(days=7)).strftime('%Y-%m-%d')
     data_menos_14 = (data_ini_atual - timedelta(days=14)).strftime('%Y-%m-%d')
     semanas_passadas = df_semanas_todas[df_semanas_todas['data_inicio'].isin([data_menos_7, data_menos_14])]
-    historico_colabs = {row['nome']: {"6:50 HRS": 0, "10:00 HRS": 0, "12:00 HRS": 0} for _, row in df_colabs_op.iterrows()}
+    
+    historico_colabs = {row['nome']: {"6:50 HRS": 0, "10:00 HRS": 0, "12:00 HRS": 0} for _, row in df_ativos.iterrows()}
+    
     for _, row_sem in semanas_passadas.iterrows():
         id_sem = int(row_sem['id'])
         data_ini_sem = row_sem['data_inicio']
@@ -277,13 +310,17 @@ def gerar_alocacao_semanal(df_colabs_op, data_ini_atual, df_semanas_todas):
                 if h == "9:30 HRS": h = "10:00 HRS"
                 if nome in historico_colabs and h in historico_colabs[nome]:
                     historico_colabs[nome][h] += peso
+                    
     alocacao = {}
     nomes_embaralhados = list(historico_colabs.keys())
     random.shuffle(nomes_embaralhados) 
+    
     prefs = {}
     for nome in nomes_embaralhados:
         prefs[nome] = sorted(["6:50 HRS", "10:00 HRS", "12:00 HRS"], key=lambda t: historico_colabs[nome][t])
+        
     nomes_embaralhados.sort(key=lambda n: historico_colabs[n][prefs[n][1]] - historico_colabs[n][prefs[n][0]], reverse=True)
+    
     for nome in nomes_embaralhados:
         alocado = False
         for t in prefs[nome]:
@@ -296,22 +333,6 @@ def gerar_alocacao_semanal(df_colabs_op, data_ini_atual, df_semanas_todas):
     return alocacao
 
 # --- FUNÇÕES DE LÓGICA DA ESCALA MÁGICA (ETAPA 2) ---
-def trabalhou_na_data(nome, data_alvo, df_semanas_todas):
-    for _, w in df_semanas_todas.iterrows():
-        try:
-            d_ini = pd.to_datetime(w['data_inicio']).date()
-            d_fim = d_ini + timedelta(days=6)
-            if d_ini <= data_alvo <= d_fim:
-                df_esc = carregar_escala_semana_por_id(int(w['id']))
-                if not df_esc.empty:
-                    df_esc['data_date'] = pd.to_datetime(df_esc['data']).dt.date
-                    row = df_esc[(df_esc['nome'] == nome) & (df_esc['data_date'] == data_alvo)]
-                    if not row.empty:
-                        h = str(row.iloc[0]['horario'])
-                        if h and "HRS" in h: return True
-        except: pass
-    return False
-
 def atribuir_caixas_dia(dia_items):
     alocacao = {}
     abertura = []
@@ -861,7 +882,7 @@ def aba_gerenciar_semanas(df_semanas_todas: pd.DataFrame):
         if st.button("✨ Inicializar Semana", type="primary", use_container_width=True):
             data_inicio = data_sel - timedelta(days=data_sel.weekday())
             if inicializar_semana_simples(data_inicio):
-                st.cache_data.clear(); st.success("Semana inicializada com as Folgas Fixas!"); time.sleep(1.5); st.rerun()
+                st.cache_data.clear(); st.success("Semana inicializada!"); time.sleep(1.5); st.rerun()
     
     st.markdown("---"); st.markdown("##### 📂 Histórico de Semanas")
     if not df_semanas_todas.empty:
@@ -971,7 +992,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
     # ---------------- ETAPA 1: GERAR HORÁRIOS ----------------
     st.markdown("---")
     st.subheader("1️⃣ Gerar Horários (Rodízio Inteligente)")
-    st.info("Baixe a planilha com os horários pré-preenchidos. O sistema vai analisar os últimos 14 dias para rodar a equipe de forma justa.")
+    st.info("Baixe a planilha com os horários pré-preenchidos. O sistema vai analisar os últimos 14 dias para rodar a equipe de forma justa de Segunda a Sábado.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -987,6 +1008,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         if 'funcao' in df_filtrado_m.columns: df_filtrado_m = df_filtrado_m[df_filtrado_m['funcao'] == "Operador(a) de Caixa"]
             
         mapa_folga_fixa_m = {row['nome']: row.get('folga_fixa', '') for _, row in df_filtrado_m.iterrows()}
+        mapa_status_m = {row['nome']: row.get('status', 'Ativo') for _, row in df_filtrado_m.iterrows()}
         
         if df_filtrado_m.empty: st.error("Não há Operadores de Caixa cadastrados.")
         else:
@@ -1039,14 +1061,28 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         for i_day in range(7):
                             d_atual = data_ini_m + timedelta(days=i_day)
                             h_val = alocacao_auto.get(row_name, "")
+                            c_val = ""
+                            
+                            # Ajuste de Quartas e Quintas
                             if h_val == "10:00 HRS" and d_atual.weekday() in [2, 3]: h_val = "9:30 HRS"
+                            
+                            # Domingo vazio (manual)
                             if d_atual.weekday() == 6: h_val = ""
                             
-                            dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
-                            if mapa_folga_fixa_m.get(row_name, "") == dia_semana_atual: h_val = "Folga"
+                            # STATUS GLOBAL SOBREPÕE TUDO
+                            status_colab = mapa_status_m.get(row_name, "Ativo")
+                            if status_colab in ["Ferias", "Afastado(a)", "Atestado"]:
+                                h_val = status_colab
+                                c_val = "---"
+                            else:
+                                # Folga Fixa sobrepõe
+                                dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
+                                if mapa_folga_fixa_m.get(row_name, "") == dia_semana_atual: 
+                                    h_val = "Folga"
+                                    c_val = "---"
                             
                             worksheet.write(row_excel, current_c, h_val, fmt_grid); current_c += 1
-                            worksheet.write(row_excel, current_c, "", fmt_grid); current_c += 1
+                            worksheet.write(row_excel, current_c, c_val, fmt_grid); current_c += 1
 
                     col_idx = 1
                     for i in range(7):
@@ -1104,19 +1140,18 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
 
             st.download_button(label="📥 1. Baixar Excel com Horários Inteligentes", data=buffer_m.getvalue(), file_name=f"escala_MAGICA_horarios_{data_ini_m.strftime('%d-%m')}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="primary")
 
-    # ---------------- ETAPA 2: ATRIBUIR CAIXAS E DOMINGOS ----------------
+    # ---------------- ETAPA 2: ATRIBUIR CAIXAS ----------------
     st.markdown("---")
-    st.subheader("2️⃣ Atribuir Caixas e Domingos Automaticamente")
-    st.info("Faça o upload da planilha (após seus ajustes manuais se houver). O sistema vai cobrir os buracos dos Domingos (regra 1x1) e distribuir os caixas respeitando as prioridades!")
+    st.subheader("2️⃣ Atribuir Caixas Automaticamente")
+    st.info("Faça o upload da planilha (após preencher os Domingos). O sistema vai distribuir os caixas respeitando as prioridades!")
     
     arquivo_upload_magica = st.file_uploader("Arraste o Excel **com os horários preenchidos** aqui:", type=["xlsx"], key="magica_upload_cx")
     
     if arquivo_upload_magica is not None:
-        if st.button("🪄 Processar Domingos e Distribuir Caixas", type="primary"):
-            with st.spinner("Analisando Domingos e Distribuindo Caixas..."):
+        if st.button("🪄 Distribuir Caixas", type="primary"):
+            with st.spinner("Distribuindo Caixas..."):
                 df_up = pd.read_excel(arquivo_upload_magica)
                 
-                # Tratamento blindado para o cabeçalho (Evita o erro de Timestamp)
                 novas_colunas = []
                 for col in df_up.columns:
                     if isinstance(col, (datetime.datetime, pd.Timestamp, date)):
@@ -1144,11 +1179,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         cx_col = f"CX_REF_{col_data}"
                         c_val = str(row.get(cx_col, ""))
                         if c_val == "nan": c_val = ""
-                        
-                        if dt.weekday() == 6 and h_val.strip() == "":
-                            trab_passado = trabalhou_na_data(nome, dt - timedelta(days=7), df_semanas_todas)
-                            if trab_passado: h_val = "Folga"
-                            else: h_val = random.choice(["8:00 HRS", "12:00 HRS"]) 
                                 
                         dados_existentes[(nome, dt)] = {'horario': h_val, 'caixa': c_val}
                         
@@ -1163,7 +1193,12 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                     
                     for nome in nomes_validos:
                         if (nome, dt) in dados_existentes:
-                            dados_existentes[(nome, dt)]['caixa'] = alocacao.get(nome, "")
+                            # Só aloca caixa se não for folga/ferias/etc
+                            h_val = dados_existentes[(nome, dt)]['horario']
+                            if h_val in ["Folga", "Ferias", "Atestado", "Afastado(a)"]:
+                                dados_existentes[(nome, dt)]['caixa'] = "---"
+                            else:
+                                dados_existentes[(nome, dt)]['caixa'] = alocacao.get(nome, "")
                             
                 colunas_f = ['Nome']
                 for i in range(7):
@@ -1230,7 +1265,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                             worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA))})
                             col_idx += 1
                             
-                        # ADICIONANDO AS FÓRMULAS DE SOMA NO FINAL DO ARQUIVO DA ETAPA 2
                         worksheet.write(row_total_m, 0, "Operadoras Manhã", fmt_manha)
                         worksheet.write(row_total_t, 0, "Operadoras Tarde", fmt_tarde)
                         
@@ -1271,7 +1305,7 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                 
                 st.session_state['magica_buffer'] = buffer_out.getvalue()
                 st.session_state['magica_filename'] = f"escala_FINALIZADA_{data_ini_up.strftime('%d-%m')}.xlsx"
-                st.success("✅ Caixas e Domingos processados com sucesso!")
+                st.success("✅ Caixas processados com sucesso!")
                 
     if 'magica_buffer' in st.session_state:
         st.download_button(
@@ -1311,6 +1345,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
             df_filtrado = df_filtrado[df_filtrado['funcao'] == funcao_selecionada]
             
         mapa_folga_fixa = {row['nome']: row.get('folga_fixa', '') for _, row in df_filtrado.iterrows()}
+        mapa_status = {row['nome']: row.get('status', 'Ativo') for _, row in df_filtrado.iterrows()}
         
         if df_filtrado.empty:
             st.error(f"Não há colaboradores com função '{funcao_selecionada}'.")
@@ -1391,13 +1426,18 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             info = dados_existentes.get((row_name, d_atual), {})
                             
                             h_val = info.get('horario', "")
+                            c_val = info.get('caixa', "")
                             
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
+                            status_colab = mapa_status.get(row_name, "Ativo")
                             
-                            # Folga fixa MANUAL padrao
-                            if folga_fixa_colab == dia_semana_atual:
+                            if status_colab in ["Ferias", "Afastado(a)", "Atestado"]:
+                                h_val = status_colab
+                                c_val = "---"
+                            elif folga_fixa_colab == dia_semana_atual:
                                 h_val = "Folga"
+                                c_val = "---"
                             
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
@@ -1405,7 +1445,6 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             is_recep = (funcao_selecionada == "Recepção")
                             
                             if is_op or is_emp or is_recep:
-                                c_val = info.get('caixa', "")
                                 worksheet.write(row_excel, current_c, c_val, fmt_grid)
                                 current_c += 1
 
@@ -1510,6 +1549,7 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
         mapa_original = {row['nome']: row['funcao'] for _, row in df_colaboradores.iterrows()}
         mapa_social = {row['nome']: row['nome_social'] for _, row in df_colaboradores.iterrows()}
         mapa_folga = {row['nome']: row.get('folga_fixa', '') for _, row in df_colaboradores.iterrows()}
+        mapa_status = {row['nome']: row.get('status', 'Ativo') for _, row in df_colaboradores.iterrows()}
         
         df_editor = df_colaboradores.copy()
         
@@ -1517,11 +1557,12 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
             "nome": st.column_config.TextColumn("Nome", disabled=True),
             "funcao": st.column_config.SelectboxColumn("Função (Cargo)", options=FUNCOES_LOJA, required=True, width="medium"),
             "nome_social": st.column_config.TextColumn("Nome Social (Para Impressão)", width="medium"),
-            "folga_fixa": st.column_config.SelectboxColumn("Folga Fixa", options=[""] + DIAS_SEMANA_PT, width="medium")
+            "folga_fixa": st.column_config.SelectboxColumn("Folga Fixa", options=[""] + DIAS_SEMANA_PT, width="medium"),
+            "status": st.column_config.SelectboxColumn("Status Atual", options=["Ativo", "Ferias", "Afastado(a)", "Atestado"], width="medium")
         }
         
         df_editado = st.data_editor(
-            df_editor[['nome', 'funcao', 'nome_social', 'folga_fixa']], 
+            df_editor[['nome', 'funcao', 'nome_social', 'folga_fixa', 'status']], 
             column_config=col_config, 
             use_container_width=True,
             key="editor_colabs",
@@ -1538,9 +1579,10 @@ def aba_gerenciar_colaboradores(df_colaboradores: pd.DataFrame):
                 nova_funcao = row['funcao']
                 novo_social = row['nome_social']
                 nova_folga = row['folga_fixa']
+                novo_status = row['status']
                 
-                if nova_funcao != mapa_original.get(nome, "") or novo_social != mapa_social.get(nome, "") or nova_folga != mapa_folga.get(nome, ""):
-                    atualizar_dados_colaborador(nome, nova_funcao, novo_social, nova_folga)
+                if nova_funcao != mapa_original.get(nome, "") or novo_social != mapa_social.get(nome, "") or nova_folga != mapa_folga.get(nome, "") or novo_status != mapa_status.get(nome, ""):
+                    atualizar_dados_colaborador(nome, nova_funcao, novo_social, nova_folga, novo_status)
                     contador_updates += 1
                 if index % 5 == 0: barra.progress((index+1)/total)
             
