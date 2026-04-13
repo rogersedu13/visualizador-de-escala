@@ -94,6 +94,7 @@ def carregar_colaboradores() -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty: 
             df['nome'] = df['nome'].str.strip()
+            
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
             if 'nome_social' not in df.columns: df['nome_social'] = None
             if 'folga_fixa' not in df.columns: df['folga_fixa'] = None
@@ -285,65 +286,74 @@ def carregar_fiscais() -> pd.DataFrame:
         {"codigo": 1016, "nome": "Amanda", "senha": "5"}
     ])
 
-# --- FUNÇÃO DE ALOCAÇÃO AUTOMÁTICA INTELIGENTE (MATRIZ DE DEMANDA) ---
+
+# --- FUNÇÃO DE ALOCAÇÃO AUTOMÁTICA INTELIGENTE (MATRIZ DE DEMANDA E ANTI-REPETIÇÃO) ---
 def gerar_alocacao_semanal(df_colabs_op, data_ini_atual, df_semanas_todas):
     """
-    Distribui os turnos para as operadoras tentando cobrir:
-    ~45% em 6:50 HRS
-    ~20% em 10:00 HRS
-    ~35% em 12:00 HRS
-    Baseado nos turnos menos feitos por elas nas 2 últimas semanas.
+    Distribui os turnos com as proporções exatas para evitar repetição.
+    Proporção: 35% em 6:50 | 20% em 10:00 | 45% em 12:00
     """
     n_total = len(df_colabs_op)
     if n_total == 0: return {}
     
-    # 1. Definindo as "Vagas" necessárias para bater a meta da loja
-    vagas_650 = int(n_total * 0.45)
-    vagas_1200 = int(n_total * 0.35)
-    vagas_1000 = n_total - vagas_650 - vagas_1200 
+    # 1. Definindo as "Vagas" necessárias (arredondamento justo)
+    vagas_650 = int(n_total * 0.35)
+    vagas_1200 = int(n_total * 0.45)
+    vagas_1000 = n_total - vagas_650 - vagas_1200 # O resto preenche o meio
     
-    vagas_disponiveis = {"6:50 HRS": vagas_650, "12:00 HRS": vagas_1200, "10:00 HRS": vagas_1000}
+    vagas_disponiveis = {"6:50 HRS": vagas_650, "10:00 HRS": vagas_1000, "12:00 HRS": vagas_1200}
     
-    # 2. Olhar o histórico do Banco de Dados (Últimos 14 dias)
+    # 2. Pesquisa do Passado (Últimos 14 dias)
     data_menos_7 = (data_ini_atual - timedelta(days=7)).strftime('%Y-%m-%d')
     data_menos_14 = (data_ini_atual - timedelta(days=14)).strftime('%Y-%m-%d')
     
     semanas_passadas = df_semanas_todas[df_semanas_todas['data_inicio'].isin([data_menos_7, data_menos_14])]
-    ids_passados = semanas_passadas['id'].tolist()
     
-    # Zera os placares de todo mundo
+    # Placares (Quanto mais pontos, MAIS a pessoa fez esse turno, logo MENOS ela deve fazer agora)
     historico_colabs = {row['nome']: {"6:50 HRS": 0, "10:00 HRS": 0, "12:00 HRS": 0} for _, row in df_colabs_op.iterrows()}
     
-    # Preenche os placares com o que elas trabalharam
-    for id_sem in ids_passados:
-        df_escala = carregar_escala_semana_por_id(int(id_sem))
+    for _, row_sem in semanas_passadas.iterrows():
+        id_sem = int(row_sem['id'])
+        data_ini_sem = row_sem['data_inicio']
+        
+        # Penaliza absurdamente o que ela fez na última semana, pra evitar repetir de cara
+        peso = 10 if data_ini_sem == data_menos_7 else 1
+        
+        df_escala = carregar_escala_semana_por_id(id_sem)
         if not df_escala.empty:
             for _, row in df_escala.iterrows():
                 nome = row['nome']
                 h = row['horario']
+                
+                # Trata o 9:30 como 10:00 para fins de histórico e rodízio
+                if h == "9:30 HRS": h = "10:00 HRS"
+                
                 if nome in historico_colabs and h in historico_colabs[nome]:
-                    historico_colabs[nome][h] += 1
+                    historico_colabs[nome][h] += peso
                     
     alocacao = {}
-    
-    # Embaralha os nomes para ser justo (se houver empate de histórico, o sorteio decide quem fica com a vaga)
     nomes_embaralhados = list(historico_colabs.keys())
-    random.shuffle(nomes_embaralhados) 
+    random.shuffle(nomes_embaralhados) # Sorteio de desempate
     
-    # 3. Distribuição das Vagas
+    # Cria a lista de preferência de cada um (do que MENOS fez para o que MAIS fez)
+    prefs = {}
     for nome in nomes_embaralhados:
-        # Ordena do turno que a operadora MENOS fez pro que MAIS fez
-        turnos_preferencia = sorted(historico_colabs[nome].keys(), key=lambda t: historico_colabs[nome][t])
+        prefs[nome] = sorted(["6:50 HRS", "10:00 HRS", "12:00 HRS"], key=lambda t: historico_colabs[nome][t])
         
+    # PULO DO GATO (ANTI-REPETIÇÃO): Quem tem um turno muito repetido (alta pontuação) escolhe a vaga primeiro.
+    nomes_embaralhados.sort(key=lambda n: historico_colabs[n][prefs[n][1]] - historico_colabs[n][prefs[n][0]], reverse=True)
+    
+    # 3. Distribuição Oficial das Vagas
+    for nome in nomes_embaralhados:
         alocado = False
-        for t in turnos_preferencia:
+        for t in prefs[nome]:
             if vagas_disponiveis[t] > 0:
                 alocacao[nome] = t
                 vagas_disponiveis[t] -= 1
                 alocado = True
                 break
         
-        # Fallback de Segurança: Se os favoritos dela acabaram as vagas, pega o que sobrar
+        # Caso extremo (se a preferência ideal acabou, ela cata o que tiver de vaga para fechar a escala)
         if not alocado:
             for t in vagas_disponiveis.keys():
                 if vagas_disponiveis[t] > 0:
@@ -388,6 +398,7 @@ def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, se
     """
 
 def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_tema):
+    
     lista_op_folga = []
     lista_emp_folga = []
     status_invisivel = ["Ferias", "Afastado(a)", "Atestado", "", None]
@@ -412,6 +423,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
     for _, row in df_ops_sorted.iterrows():
         horario = str(row['horario'])
+        
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -420,6 +432,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             nome = str(row['nome']).upper()
             
         cx = str(row.get('numero_caixa', '')).replace('.0', '')
+        
         if horario in status_invisivel or horario == "nan": continue
         if "Folga" in horario:
             lista_op_folga.append(nome)
@@ -427,6 +440,7 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
             
         mins = calcular_minutos(horario)
         is_self = (cx == "Self")
+        
         cx_upper = cx.upper()
         is_excluded_count = (cx_upper in ["RECEPÇÃO", "DELIVERY", "MAGAZINE", "SALINHA"])
 
@@ -444,11 +458,20 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
                 elif not is_excluded_count: c_op_tarde += 1
 
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
-        flat_ops_data.append({ 'cx': cx, 'nome': nome, 'h_clean': h_clean, 'mins': mins, 'rank': row['rank_cx'], 'has_separator': False })
+        
+        flat_ops_data.append({
+            'cx': cx, 
+            'nome': nome, 
+            'h_clean': h_clean, 
+            'mins': mins, 
+            'rank': row['rank_cx'],
+            'has_separator': False
+        })
 
     df_emp_sorted = df_emp_dia.sort_values(by='nome')
     for _, row in df_emp_sorted.iterrows():
         horario = str(row['horario'])
+        
         if 'nome_impressao' in row and pd.notna(row['nome_impressao']) and str(row['nome_impressao']).strip() != "":
             nome = str(row['nome_impressao']).upper()
         elif 'nome_social' in row and pd.notna(row['nome_social']) and str(row['nome_social']).strip() != "":
@@ -469,36 +492,50 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         if mins >= 570: c_emp_tarde += 1
         
         h_clean = horario.replace(" HRS", "H").replace(":", ":")
+        
         nome_display = nome
         if tarefa and tarefa != "nan" and tarefa != "":
             nome_display = f"{nome} <span style='font-size:0.85em'>({tarefa})</span>"
             
-        flat_emp_data.append({ 'nome': nome_display, 'h_clean': h_clean, 'mins': mins, 'has_separator': False })
+        flat_emp_data.append({
+            'nome': nome_display, 
+            'h_clean': h_clean, 
+            'mins': mins,
+            'has_separator': False
+        })
 
     flat_ops_data.sort(key=lambda x: (x['mins'], -x['rank']))
     flat_emp_data.sort(key=lambda x: (x['mins'], x['nome']))
 
     for i in range(len(flat_ops_data) - 1):
-        if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']: flat_ops_data[i]['has_separator'] = True
+        if flat_ops_data[i]['h_clean'] != flat_ops_data[i+1]['h_clean']:
+            flat_ops_data[i]['has_separator'] = True
+    
     for i in range(len(flat_emp_data) - 1):
-        if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']: flat_emp_data[i]['has_separator'] = True
+        if flat_emp_data[i]['h_clean'] != flat_emp_data[i+1]['h_clean']:
+            flat_emp_data[i]['has_separator'] = True
 
     final_emp_list = []
     for emp in flat_emp_data:
         final_emp_list.append(emp)
-        if emp.get('has_separator'): final_emp_list.append(None) 
+        if emp.get('has_separator'):
+            final_emp_list.append(None) 
             
     rows_html = ""
     for op, emp in zip_longest(flat_ops_data, final_emp_list, fillvalue=None):
         op_html = ""
         op_class_extra = " separator-bottom" if (op and op['has_separator']) else ""
-        if op: op_html = f"<td class='cx-col{op_class_extra}'>{op['cx']}</td><td class='nome-col{op_class_extra}'>{op['nome']}</td><td class='horario-col{op_class_extra}'>{op['h_clean']}</td>"
-        else: op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
+        if op:
+            op_html = f"<td class='cx-col{op_class_extra}'>{op['cx']}</td><td class='nome-col{op_class_extra}'>{op['nome']}</td><td class='horario-col{op_class_extra}'>{op['h_clean']}</td>"
+        else:
+            op_html = "<td class='cx-col'></td><td class='nome-col'></td><td class='horario-col'></td>"
         
         emp_html = ""
         emp_class_extra = " separator-bottom" if (emp and emp.get('has_separator')) else ""
-        if emp: emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
-        else: emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
+        if emp:
+            emp_html = f"<td class='col-emp-nome border-left{emp_class_extra}'>{emp['nome']}</td><td class='horario-col{emp_class_extra}'>{emp['h_clean']}</td>"
+        else:
+            emp_html = "<td class='col-emp-nome border-left'></td><td class='horario-col'></td>"
             
         rows_html += f"<tr>{op_html}<td class='divider-col'></td>{emp_html}</tr>"
 
@@ -507,8 +544,16 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
 
     tot_op_m = c_op_manha + c_self_manha
     tot_op_t = c_op_tarde + c_self_tarde
-    resumo_op = f"MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES"
-    resumo_emp = f"MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>TARDE: {c_emp_tarde:02d} EMPACOTADORES"
+    
+    resumo_op = f"""
+    MANHÃ: {c_op_manha:02d} OP + {c_self_manha} SELF = {tot_op_m:02d} OPERADORES<br>
+    TARDE: {c_op_tarde:02d} OP + {c_self_tarde} SELF = {tot_op_t:02d} OPERADORES
+    """
+    
+    resumo_emp = f"""
+    MANHÃ: {c_emp_manha:02d} EMPACOTADORES<br>
+    TARDE: {c_emp_tarde:02d} EMPACOTADORES
+    """
 
     return f"""
     <!DOCTYPE html>
@@ -1115,7 +1160,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
     gerar_automatica = False
     if funcao_selecionada == "Operador(a) de Caixa":
         st.markdown("---")
-        gerar_automatica = st.checkbox("🤖 Gerar Escala Automática")
+        gerar_automatica = st.checkbox("🤖 Gerar Escala Rotativa Automática (Analisa e sugere o turno baseado nas últimas 2 semanas)")
     
     if semana_info and funcao_selecionada:
         data_ini = semana_info['data_inicio']
@@ -1220,6 +1265,10 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                                     h_val = ""
                                 else:
                                     h_val = alocacao_auto.get(row_name, "")
+                                    
+                                    # Ajuste especial para Quartas (2) e Quintas (3) - Se for 10:00 vira 9:30
+                                    if h_val == "10:00 HRS" and d_atual.weekday() in [2, 3]:
+                                        h_val = "9:30 HRS"
                             
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
