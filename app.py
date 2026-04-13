@@ -406,10 +406,8 @@ def gerar_html_layout_exato(df_ops_dia, df_emp_dia, data_str, dia_semana, cor_te
         if cx.isdigit(): return int(cx)
         return -50 
     
-    if not df_ops_dia.empty:
-        df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
-    else:
-        df_ops_dia['rank_cx'] = []
+    if not df_ops_dia.empty: df_ops_dia['rank_cx'] = df_ops_dia.apply(sort_key_caixa, axis=1)
+    else: df_ops_dia['rank_cx'] = []
         
     df_ops_sorted = df_ops_dia.sort_values(by='rank_cx', ascending=False) if not df_ops_dia.empty else df_ops_dia
 
@@ -1066,7 +1064,6 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
                         worksheet.data_validation(1, col_idx, last_data_row, col_idx, {'validate': 'list', 'source': '=Dados!$B$1:$B$' + str(len(LISTA_OPCOES_CAIXA))})
                         col_idx += 1
                         
-                    # ADICIONANDO AS FÓRMULAS DE SOMA NO FINAL
                     worksheet.write(row_total_m, 0, "Operadoras Manhã", fmt_manha)
                     worksheet.write(row_total_t, 0, "Operadoras Tarde", fmt_tarde)
                     
@@ -1118,15 +1115,25 @@ def aba_escala_magica(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Data
         if st.button("🪄 Processar Domingos e Distribuir Caixas", type="primary"):
             with st.spinner("Analisando Domingos e Distribuindo Caixas..."):
                 df_up = pd.read_excel(arquivo_upload_magica)
-                datas_cols = [col for col in df_up.columns if "CX_REF" not in col and "TAREFA" not in col and col != "Nome"]
+                
+                # Tratamento blindado para o cabeçalho (Evita o erro de Timestamp)
+                novas_colunas = []
+                for col in df_up.columns:
+                    if isinstance(col, (datetime.datetime, pd.Timestamp, date)):
+                        novas_colunas.append(col.strftime("%d/%m/%Y"))
+                    else:
+                        novas_colunas.append(str(col))
+                df_up.columns = novas_colunas
+                
+                datas_cols = [col for col in df_up.columns if "CX" not in col.upper() and "TAREFA" not in col.upper() and col.upper() != "NOME" and "UNNAMED" not in col.upper()]
                 
                 try: data_ini_up = datetime.datetime.strptime(datas_cols[0], "%d/%m/%Y").date()
-                except: st.error("Formato de data inválido na planilha."); st.stop()
+                except Exception as e: st.error(f"Formato de data inválido na planilha. Erro: {e}"); st.stop()
                     
                 dados_existentes = {}; nomes_validos = []
                 for r_idx, row in df_up.iterrows():
                     nome = row.get('Nome', "")
-                    if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome) or "Manhã" in str(nome) or "Tarde" in str(nome) or "Operadoras" in str(nome): continue
+                    if pd.isna(nome) or str(nome).strip() == "" or "TOTAL" in str(nome).upper() or "MANH" in str(nome).upper() or "TARDE" in str(nome).upper() or "OPERADOR" in str(nome).upper(): continue
                     nome = str(nome).strip()
                     nomes_validos.append(nome)
                     
@@ -1388,6 +1395,7 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                             dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                             folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                             
+                            # Folga fixa MANUAL padrao
                             if folga_fixa_colab == dia_semana_atual:
                                 h_val = "Folga"
                             
