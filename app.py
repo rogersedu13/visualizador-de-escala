@@ -93,7 +93,7 @@ def carregar_colaboradores() -> pd.DataFrame:
         response = supabase.table('colaboradores').select('*').execute()
         df = pd.DataFrame(response.data)
         if not df.empty: 
-            df['nome'] = df['nome'].str.strip()
+            df['nome'] = df['nome'].astype(str).str.strip()
             if 'funcao' not in df.columns: df['funcao'] = 'Operador(a) de Caixa'
             if 'nome_social' not in df.columns: df['nome_social'] = None
             if 'folga_fixa' not in df.columns: df['folga_fixa'] = None
@@ -123,12 +123,14 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
-            df['nome'] = df['nome'].str.strip()
+            df['nome'] = df['nome'].astype(str).str.strip()
             if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
             df['numero_caixa'] = df['numero_caixa'].fillna("")
             
-            # BLINDAGEM: Garante que se houver duplicatas no banco, pega sempre a última alteração!
-            df = df.sort_values('data').drop_duplicates(subset=['nome', 'data'], keep='last')
+            # --- AQUI ESTÁ A BLINDAGEM ANTI-DICIONÁRIO PARA DROPAR AS DUPLICATAS ---
+            df['chave_duplicata'] = df['nome'] + "_" + df['data'].astype(str)
+            df = df.drop_duplicates(subset=['chave_duplicata'], keep='last').drop(columns=['chave_duplicata'])
+            # -----------------------------------------------------------------------
             
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
@@ -268,6 +270,134 @@ def carregar_fiscais() -> pd.DataFrame:
         {"codigo": 1005, "nome": "Fabiana", "senha": "4"},
         {"codigo": 1016, "nome": "Amanda", "senha": "5"}
     ])
+
+# --- FUNÇÕES DE ALOCAÇÃO AUTOMÁTICA DE HORÁRIOS (RODÍZIO) ---
+def gerar_alocacao_semanal(df_colabs_op, data_ini_atual, df_semanas_todas):
+    df_ativos = df_colabs_op[~df_colabs_op['status'].isin(['Ferias', 'Afastado(a)', 'Atestado'])]
+    n_total = len(df_ativos)
+    if n_total == 0: return {}
+    vagas_650 = int(n_total * 0.35)
+    vagas_1200 = int(n_total * 0.45)
+    vagas_1000 = n_total - vagas_650 - vagas_1200 
+    vagas_disponiveis = {"6:50 HRS": vagas_650, "10:00 HRS": vagas_1000, "12:00 HRS": vagas_1200}
+    
+    data_menos_7 = (data_ini_atual - timedelta(days=7)).strftime('%Y-%m-%d')
+    data_menos_14 = (data_ini_atual - timedelta(days=14)).strftime('%Y-%m-%d')
+    semanas_passadas = df_semanas_todas[df_semanas_todas['data_inicio'].isin([data_menos_7, data_menos_14])]
+    historico_colabs = {row['nome']: {"6:50 HRS": 0, "10:00 HRS": 0, "12:00 HRS": 0} for _, row in df_ativos.iterrows()}
+    
+    for _, row_sem in semanas_passadas.iterrows():
+        id_sem = int(row_sem['id'])
+        data_ini_sem = row_sem['data_inicio']
+        peso = 10 if data_ini_sem == data_menos_7 else 1
+        df_escala = carregar_escala_semana_por_id(id_sem)
+        if not df_escala.empty:
+            for _, row in df_escala.iterrows():
+                nome = row['nome']; h = row['horario']
+                if h == "9:30 HRS": h = "10:00 HRS"
+                if nome in historico_colabs and h in historico_colabs[nome]:
+                    historico_colabs[nome][h] += peso
+                    
+    alocacao = {}
+    nomes_embaralhados = list(historico_colabs.keys())
+    random.shuffle(nomes_embaralhados) 
+    prefs = {}
+    for nome in nomes_embaralhados:
+        prefs[nome] = sorted(["6:50 HRS", "10:00 HRS", "12:00 HRS"], key=lambda t: historico_colabs[nome][t])
+    nomes_embaralhados.sort(key=lambda n: historico_colabs[n][prefs[n][1]] - historico_colabs[n][prefs[n][0]], reverse=True)
+    
+    for nome in nomes_embaralhados:
+        alocado = False
+        for t in prefs[nome]:
+            if vagas_disponiveis[t] > 0:
+                alocacao[nome] = t; vagas_disponiveis[t] -= 1; alocado = True; break
+        if not alocado:
+            for t in vagas_disponiveis.keys():
+                if vagas_disponiveis[t] > 0:
+                    alocacao[nome] = t; vagas_disponiveis[t] -= 1; break
+    return alocacao
+
+# --- FUNÇÕES DE LÓGICA DA ESCALA MÁGICA (ETAPA 2) ---
+def trabalhou_na_data(nome, data_alvo, df_semanas_todas):
+    for _, w in df_semanas_todas.iterrows():
+        try:
+            d_ini = pd.to_datetime(w['data_inicio']).date()
+            d_fim = d_ini + timedelta(days=6)
+            if d_ini <= data_alvo <= d_fim:
+                df_esc = carregar_escala_semana_por_id(int(w['id']))
+                if not df_esc.empty:
+                    df_esc['data_date'] = pd.to_datetime(df_esc['data']).dt.date
+                    row = df_esc[(df_esc['nome'] == nome) & (df_esc['data_date'] == data_alvo)]
+                    if not row.empty:
+                        h = str(row.iloc[0]['horario'])
+                        if h and "HRS" in h: return True
+        except: pass
+    return False
+
+def atribuir_caixas_dia(dia_items, historico_semana_cx):
+    alocacao = {}
+    abertura = []
+    fechamento = []
+    intermediario = []
+    
+    for nome, h in dia_items:
+        if not isinstance(h, str) or "Folga" in h or "Feria" in h or "Afast" in h or "Atest" in h or h.strip() == "" or h.strip() == "nan":
+            alocacao[nome] = "---"
+            continue
+            
+        if h in ["9:30 HRS", "10:00 HRS", "10:30 HRS"]:
+            intermediario.append(nome)
+        elif calcular_minutos(h) <= 540: 
+            abertura.append(nome)
+        else: 
+            fechamento.append(nome)
+            
+    caixas_prioridade = ['Self', '17', '16', '15', '5', '1']
+    caixas_pares = ['14', '12', '10', '8', '6', '4', '2']
+    caixas_impares = ['13', '11', '9', '7', '3']
+    
+    def escolher_caixa_sem_repetir(nome, lista_disp):
+        opcoes_nao_usadas = [cx for cx in lista_disp if cx not in historico_semana_cx.get(nome, set())]
+        if opcoes_nao_usadas:
+            cx_escolhido = opcoes_nao_usadas[0] 
+            lista_disp.remove(cx_escolhido)
+            return cx_escolhido
+        elif lista_disp:
+            cx_escolhido = lista_disp.pop(0)
+            return cx_escolhido
+        return ""
+    
+    random.shuffle(caixas_prioridade)
+    random.shuffle(caixas_pares)
+    random.shuffle(caixas_impares)
+    
+    disp_pares = list(caixas_pares)
+    random.shuffle(intermediario)
+    for nome in intermediario:
+        cx = escolher_caixa_sem_repetir(nome, disp_pares)
+        alocacao[nome] = cx
+        if cx: historico_semana_cx.setdefault(nome, set()).add(cx)
+        
+    disp_pri_m = list(caixas_prioridade)
+    disp_imp_m = list(caixas_impares)
+    random.shuffle(abertura)
+    for nome in abertura:
+        cx = escolher_caixa_sem_repetir(nome, disp_pri_m)
+        if not cx: cx = escolher_caixa_sem_repetir(nome, disp_imp_m)
+        alocacao[nome] = cx
+        if cx: historico_semana_cx.setdefault(nome, set()).add(cx)
+        
+    disp_pri_t = list(caixas_prioridade) 
+    disp_imp_t = list(caixas_impares)
+    random.shuffle(fechamento)
+    for nome in fechamento:
+        cx = escolher_caixa_sem_repetir(nome, disp_pri_t)
+        if not cx: cx = escolher_caixa_sem_repetir(nome, disp_imp_t)
+        alocacao[nome] = cx
+        if cx: historico_semana_cx.setdefault(nome, set()).add(cx)
+        
+    return alocacao
+
 
 # --- FUNÇÕES DE IMPRESSÃO E LAYOUT ---
 def gerar_html_escala_semanal(df_escala: pd.DataFrame, nome_colaborador: str, semana_str: str) -> str:
@@ -912,21 +1042,15 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         for i_day in range(7):
                             d_atual = data_ini + timedelta(days=i_day)
                             
-                            # 1. VERIFICA O QUE TEM NO BANCO DE DADOS PRIMEIRO
                             if (row_name, d_atual) in dados_existentes:
                                 info = dados_existentes[(row_name, d_atual)]
                                 h_val = info.get('horario', "")
                                 c_val = info.get('caixa', "")
-                                
-                                # Proteção caso venha NaN do banco
                                 if pd.isna(h_val): h_val = ""
                                 if pd.isna(c_val): c_val = ""
-                                
                             else:
-                                # 2. SÓ APLICA FOLGA FIXA E FÉRIAS SE O BANCO ESTIVER ZERADO (ex: funcionário novo)
                                 h_val = ""
                                 c_val = ""
-                                
                                 dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
                                 folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
                                 status_colab = mapa_status.get(row_name, "Ativo")
