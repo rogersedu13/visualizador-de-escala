@@ -127,6 +127,9 @@ def carregar_escala_semana_por_id(id_semana: int) -> pd.DataFrame:
             if 'numero_caixa' not in df.columns: df['numero_caixa'] = ""
             df['numero_caixa'] = df['numero_caixa'].fillna("")
             
+            # BLINDAGEM: Garante que se houver duplicatas no banco, pega sempre a última alteração!
+            df = df.sort_values('data').drop_duplicates(subset=['nome', 'data'], keep='last')
+            
             df_colabs = carregar_colaboradores()
             if not df_colabs.empty and 'funcao' in df_colabs.columns:
                 cols_to_merge = ['nome', 'funcao']
@@ -261,7 +264,7 @@ def carregar_fiscais() -> pd.DataFrame:
     return pd.DataFrame([
         {"codigo": 1017, "nome": "Rogério", "senha": "1"},
         {"codigo": 1002, "nome": "Andrews", "senha": "2"},
-        {"codigo": 1015, "nome": "Gisele", "senha": "3"},
+        {"codigo": 1015, "nome": "Regiane", "senha": "3"},
         {"codigo": 1005, "nome": "Fabiana", "senha": "4"},
         {"codigo": 1016, "nome": "Amanda", "senha": "5"}
     ])
@@ -908,21 +911,32 @@ def aba_importar_excel(df_colaboradores: pd.DataFrame, df_semanas_ativas: pd.Dat
                         current_c = 1
                         for i_day in range(7):
                             d_atual = data_ini + timedelta(days=i_day)
-                            info = dados_existentes.get((row_name, d_atual), {})
                             
-                            h_val = info.get('horario', "")
-                            c_val = info.get('caixa', "")
-                            
-                            dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
-                            folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
-                            status_colab = mapa_status.get(row_name, "Ativo")
-                            
-                            if status_colab in ["Ferias", "Afastado(a)", "Atestado"]:
-                                h_val = status_colab
-                                c_val = "---"
-                            elif folga_fixa_colab == dia_semana_atual:
-                                h_val = "Folga"
-                                c_val = "---"
+                            # 1. VERIFICA O QUE TEM NO BANCO DE DADOS PRIMEIRO
+                            if (row_name, d_atual) in dados_existentes:
+                                info = dados_existentes[(row_name, d_atual)]
+                                h_val = info.get('horario', "")
+                                c_val = info.get('caixa', "")
+                                
+                                # Proteção caso venha NaN do banco
+                                if pd.isna(h_val): h_val = ""
+                                if pd.isna(c_val): c_val = ""
+                                
+                            else:
+                                # 2. SÓ APLICA FOLGA FIXA E FÉRIAS SE O BANCO ESTIVER ZERADO (ex: funcionário novo)
+                                h_val = ""
+                                c_val = ""
+                                
+                                dia_semana_atual = DIAS_SEMANA_PT[d_atual.weekday()]
+                                folga_fixa_colab = mapa_folga_fixa.get(row_name, "")
+                                status_colab = mapa_status.get(row_name, "Ativo")
+                                
+                                if status_colab in ["Ferias", "Afastado(a)", "Atestado"]:
+                                    h_val = status_colab
+                                    c_val = "---"
+                                elif folga_fixa_colab == dia_semana_atual:
+                                    h_val = "Folga"
+                                    c_val = "---"
                             
                             worksheet.write(row_excel, current_c, h_val, fmt_grid)
                             current_c += 1
@@ -1279,7 +1293,7 @@ def main():
     if st.session_state.logado:
         exibir_painel_alertas(df_semanas_ativas, df_colaboradores)
         
-        t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["🗓️ Semanas", "✏️ Editar", "🖨️ Diária", "📌 Pedidos", "🧮 Calculadora de Horas", "📤 Importar", "👥 Colaboradores", "👁️ Visão Geral"])
+        t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["🗓️ Semanas", "✏️ Editar", "🖨️ Diária", "📌 Pedidos", "🧮 Calculadora", "📤 Importar", "👥 Colaboradores", "👁️ Visão Geral"])
         
         with t1: aba_gerenciar_semanas(df_semanas)
         with t2: aba_editar_escala_individual(df_colaboradores, df_semanas_ativas)
