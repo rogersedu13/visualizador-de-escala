@@ -34,6 +34,7 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine", "Salinha"] + [str(i) for i in range(1, 18)]
 
 # Para Empacotadores (Tarefas)
+# Para Empacotadores (Tarefas)
 LISTA_TAREFAS_EMPACOTADOR = [
     "", "---", 
     "Varrer Estacionamento", 
@@ -42,7 +43,10 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Carrinho", 
     "Varrer Baias", 
     "Recolher Cestas",
-    "Lavar carrinhos"
+    "Lavar carrinhos",
+    "Abastecer Varal",
+    "Limpeza dos Caixas",
+    "Limpar Cestinhas"
 ]
 
 # --- LÓGICA DE CORTE MANHÃ / TARDE ---
