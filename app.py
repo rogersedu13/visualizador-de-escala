@@ -16,7 +16,7 @@ FUNCOES_LOJA = ["Operador(a) de Caixa", "Empacotador(a)", "Fiscal de Caixa", "Re
 
 HORARIOS_PADRAO = [
     "", "Folga", "5:50 HRS", "6:30 HRS", "6:50 HRS", "7:30 HRS", "8:00 HRS", "8:30 HRS",
-    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:30 HRS",
+    "9:00 HRS", "9:30 HRS", "10:00 HRS", "10:30 HRS", "11:00 HRS", "11:40 HRS",
     "12:00 HRS", "12:30 HRS", "13:00 HRS", "13:30 HRS", "14:00 HRS",
     "14:30 HRS", "14:45 HRS", "15:00 HRS", "15:30 HRS", "15:45 HRS", 
     "16:00 HRS", "16:30 HRS", "16:45 HRS", "Ferias",
@@ -34,7 +34,6 @@ H_AMARELO  = ["Ferias", "Afastado(a)", "Atestado"]
 LISTA_OPCOES_CAIXA = ["", "---", "Self", "Recepção", "Delivery", "Magazine", "Salinha"] + [str(i) for i in range(1, 18)]
 
 # Para Empacotadores (Tarefas)
-# Para Empacotadores (Tarefas)
 LISTA_TAREFAS_EMPACOTADOR = [
     "", "---", 
     "Varrer Estacionamento", 
@@ -45,8 +44,7 @@ LISTA_TAREFAS_EMPACOTADOR = [
     "Recolher Cestas",
     "Lavar carrinhos",
     "Abastecer Varal",
-    "Limpeza dos Caixas",
-    "Limpar Cestinhas"
+    "Limpeza dos Caixas"
 ]
 
 # --- LÓGICA DE CORTE MANHÃ / TARDE ---
